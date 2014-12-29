@@ -1,5 +1,7 @@
 #include "he_math.h"
 
+using namespace std;
+
 E_val HE_fix::encrypt(int value){
 	//TODO: Convert to helib
 	return value;
@@ -99,7 +101,7 @@ double HE_fix::decode(){
 	We've recovered the plaintext, now we need to reinterpret it.
 	*/
 	long long int out_bits=(long long int)0;
-	for(i=0 ; i < this->slots ; i++){
+	for(i=0 ; i < (this->whole + this->frac) ; i++){
 		out_bits += (out_data[i] << i);
 	}
 	out_bits = (out_bits << (sizeof(long long int)*8)-slots) >> ((sizeof(long long int)*8)-slots);
@@ -116,12 +118,12 @@ double HE_fix::decode(){
 	int carry=0;
 	int in_bit=1;
 	int out_bit;
-	if(out_data[this->slots - 1]){
+	if(out_data[(this->whole + this->frac) - 1]){
 		isNegative = 1;
-		for(i=0 ; i < this->slots ; i++){
+		for(i=0 ; i < (this->whole + this->frac) ; i++){
 			out_data[i] ^= 1;
 		}
-		for(i=0 ; i < this->slots ; i++){
+		for(i=0 ; i < (this->slots + this->frac) ; i++){
 			out_bit = carry ^ out_data[i] ^ in_bit;
 			carry = (out_data[i] & in_bit)|(carry & (out_data[i] ^ in_bit));
 			out_data[i] = out_bit;
@@ -136,7 +138,7 @@ double HE_fix::decode(){
 	of 2:
 	*/
 	double result = 0.0;
-	for(i=0 ; i < this->slots ; i++){
+	for(i=0 ; i < (this->whole + this->frac) ; i++){
 		if(out_data[i]){
 			result += pow(2.0, (double)(i-frac));
 		}
@@ -212,7 +214,17 @@ HE_fix HE_fix::operator*(const HE_fix &in_value){
 	HE_fix result(0.0, this->bits, this->slots, this->whole, this->frac);
 	int i;
 	int j;
-	for(i=0 ; i < slots ; i++){
+	int k;
+	/*for(i=this->slots-1 ; i >= 0 ; i--){
+		printf("%d ", this->p_data[i]);
+	}
+	printf("\n");
+	for(i=this->slots-1 ; i >= 0 ; i--){
+		printf("%d ", temp.p_data[i]);
+	}
+	printf("\n");*/
+	for(i=0 ; i < this->slots ; i++){
+		temp = in_value;
 		temp.multiply_by_element(this->e_data[i], this->p_data[i]);
 		for(j=0 ; j < i ; j++){
 			temp.left_shift_self();
@@ -231,10 +243,4 @@ void HE_fix::multiply_by_element(E_val in_e, int in_p){
 		this->e_data[i] = this->e_data[i] * in_e;
 		this->p_data[i] = this->p_data[i] * in_p;
 	}
-}
-
-int main(int argc, char **argv){
-	double value = atof(argv[1]);
-	HE_fix test(value);
-	printf("%f\n", test.decode());
 }

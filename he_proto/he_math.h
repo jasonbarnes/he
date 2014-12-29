@@ -7,7 +7,7 @@
 #include <cmath>
 
 #define DEFAULT_BITS 16
-#define DEFAULT_SLOTS 16
+#define DEFAULT_SLOTS 32
 #define DEFAULT_WHOLE 8
 #define DEFAULT_FRAC 8
 
@@ -59,7 +59,6 @@ class HE_fix{
 		frac = in_frac;
 		this->encode(in_value);
 	}
-	
 	void operator=(const HE_fix &in_value);
 	HE_fix operator+(const HE_fix &in_value);
 	HE_fix operator-(const HE_fix &in_value);
