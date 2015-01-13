@@ -307,7 +307,6 @@ double HE_fix::decode(){
 
 void HE_fix::operator=(const HE_fix &in_value){
 	int i;
-	printf("Eq\n");
 	for(i=0 ; i < this->slots ; i++){
 		if(this->e_data[i] != NULL){
 			delete this->e_data[i];
@@ -425,6 +424,12 @@ HE_fix HE_fix::operator*(const HE_fix &in_value){
 		}
 		temp.clear();
 		p_temp.clear();
+	}
+	for(i=0 ; i < this->frac ; i++){
+		result.pop_front();
+		p_result.pop_front();
+		result.push_back(this->encrypt(0));
+		p_result.push_back(0);
 	}
 	HE_fix ret;
 	ret.e_data = result;
@@ -569,14 +574,8 @@ void  TestIt(long R, long p, long r, long d, long c, long k, long w,
   ea.encrypt(c2, publicKey, p2);
   ea.encrypt(c3, publicKey, p3);
 
-//CSGD Start
-
-/*HE_seckey=&secretKey;
-HE_pubkey=&publicKey;
-HE_ea=&ea;
-*/
-//XXX
-
+//CSGD Start XXX
+printf("CSGD Start\n");
 FHESecKey *HE_seckey;
 const FHEPubKey *HE_pubkey;
 EncryptedArray *HE_ea;
@@ -587,27 +586,30 @@ HE_ea=&ea;
 int i;
 HE_fix Xa(HE_seckey, HE_pubkey, HE_ea, 1.7);
 HE_fix Xb(HE_seckey, HE_pubkey, HE_ea, 2.3);
-HE_fix Xc = (Xa*Xb);
+HE_fix Xc;
+system("date");
+for(i=0 ; i < 10 ; i++){
+	Xc = Xa+Xb;
+}
+system("date");
 printf("%f\n", Xc.decode());
 
 //CSGD End
 
 
-/*
+
 //Original Test_General
-  resetAllTimers();
+/*
+resetAllTimers();
 
   FHE_NTIMER_START(Circuit);
-
   for (long i = 0; i < R; i++) {
 
     cerr << "*** round " << i << "..."<<endl;
-
      long shamt = RandomBnd(2*(nslots/2) + 1) - (nslots/2);
                   // random number in [-nslots/2..nslots/2]
      long rotamt = RandomBnd(2*nslots - 1) - (nslots - 1);
                   // random number in [-(nslots-1)..nslots-1]
-
      // two random constants
      PlaintextArray const1(ea);
      PlaintextArray const2(ea);
@@ -657,7 +659,6 @@ printf("%f\n", Xc.decode());
      p0.sub(p3); // c0 -= c3
      c0 -= c3;                       CheckCtxt(c0, "c0=-c3");
      debugCompare(ea,secretKey,p0,c0);
-
   }
 
   FHE_NTIMER_STOP(Circuit);
@@ -790,7 +791,7 @@ int main(int argc, char **argv)
   amap.note("e.g., ords='[4 2 -4]', negative means 'bad'");
 
   amap.parse(argc, argv);
-  
+
   if (L==0) { // determine L based on R,r
     L = 3*R+3;
     if (p>2 || r>1) { // add some more primes for each round
