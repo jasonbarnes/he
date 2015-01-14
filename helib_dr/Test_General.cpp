@@ -34,6 +34,8 @@
 #include <iostream>
 #include <sstream>
 
+#include <vector>
+
 #ifdef DEBUG
 #define debugCompare(ea,sk,p,c) {\
   PlaintextArray pp(ea);\
@@ -60,6 +62,7 @@ typedef P_int E_val;
 using namespace std;
 
 int total_recrypts;
+
 
 class HE_dr{
 	public:
@@ -247,6 +250,7 @@ void HE_dr::operator+=(const HE_dr &in){
 	if(deleteOperand){
 		delete operand;
 	}
+	this->p_data+=in.p_data;
 	return;
 }
 
@@ -283,6 +287,7 @@ void HE_dr::operator-=(const HE_dr &in){
 	if(deleteOperand){
 		delete operand;
 	}
+	this->p_data-=in.p_data;
 	return;
 }
 
@@ -294,6 +299,7 @@ void HE_dr::operator*=(const HE_dr &in){
 	}
 	//Fail if overflow has occurred.
 	assert(scale <= HE_MAX_SCALE);
+	this->p_data*=in.p_data;
 }
 
 HE_dr HE_dr::operator+(const HE_dr &in){
@@ -344,6 +350,291 @@ void HE_dr::recrypt(){
 	#endif
 }
 
+class HE_vector{
+	public:
+	vector<HE_dr *> list;
+	int n;
+	FHESecKey *HE_seckey;
+	const FHEPubKey *HE_pubkey;
+	EncryptedArray *HE_ea;
+	~HE_vector();
+	HE_vector();
+	HE_vector(FHESecKey *in_seckey, const FHEPubKey *in_pubkey, EncryptedArray *in_ea, vector<double> *in_data);
+	void encode(vector<double> in);
+	vector<double> decode();
+	void operator=(const HE_vector &in);
+	void operator+=(const HE_vector &in);
+	void operator-=(const HE_vector &in);
+	void operator*=(const HE_vector &in);
+	HE_vector operator+(const HE_vector &in);
+	HE_vector operator-(const HE_vector &in);
+	HE_vector operator*(const HE_vector &in);
+	int check(int other_n);
+};
+
+HE_vector::~HE_vector(){
+	int i;
+	for(i=0 ; i < this->n ; i++){
+		if(this->list[i] != NULL){
+			delete (this->list[i]);
+		}
+	}
+	(this->list).clear();
+}
+
+HE_vector::HE_vector(){
+	this->n=0;
+	this->list.clear();
+	this->HE_seckey=NULL;
+	this->HE_pubkey=NULL;
+	this->HE_ea=NULL;
+}
+
+HE_vector::HE_vector(FHESecKey *in_seckey, const FHEPubKey *in_pubkey, EncryptedArray *in_ea, vector<double> *in_data){
+	this->n=0;
+	this->list.clear();
+	this->HE_seckey=in_seckey;
+	this->HE_pubkey=in_pubkey;
+	this->HE_ea=in_ea;
+	this->encode(*in_data);
+}
+
+void HE_vector::encode(vector<double> in_data){
+	int i;
+	if(this->n>0){
+		for(i=0 ; i < this->n ; i++){
+			if(this->list[i] != NULL){
+				delete (this->list[i]);
+			}
+		}
+	}
+	this->list.clear();
+	this->n=0;
+	for(i=0 ; i < in_data.size() ; i++){	
+		(this->list).push_back(new HE_dr(this->HE_seckey, this->HE_pubkey, this->HE_ea, in_data[i]));
+	}
+	this->n=in_data.size();
+}
+
+vector<double> HE_vector::decode(){
+	int i;
+	vector<double> ret;
+	ret.clear();
+	for(i=0 ; i < this->n ; i++){
+		ret.push_back((*((this->list)[i])).extract());
+	}
+	return ret;
+}
+
+int HE_vector::check(int other_n){
+	if(this->n != other_n){
+		cerr << "Vector sizes do not match: " << this->n << " " << other_n << endl;
+		return 1;
+	}
+	return 0;
+}
+
+/*void HE_vector::operator=(const HE_vector &in){
+	int i;
+	//Two cases, either this HE_vector hasn't been allocated yet, (HE_vector()) , or
+	//it has and we need to do a deep copy.
+	if(this->n==0){
+		if(in.n == 0){
+			return;
+		}
+		this->n=in.n;
+		this->HE_seckey=in.HE_seckey;
+		this->HE_pubkey=in.HE_pubkey;
+		this->HE_ea=in.HE_ea;
+		this->list.clear();
+		for(i=0 ; i < this->n ; i++){
+			(this->list).push_back(new HE_dr(this->HE_seckey, this->HE_pubkey, this->HE_ea, 0.0));
+		}
+	}
+	if(this->check(in.n)){
+		return;
+	}
+	for(i=0 ; i < this->n ; i++){
+		(*(this->list[i]))=(*(in.list[i]));
+	}
+	return;
+}
+*/
+
+void HE_vector::operator=(const HE_vector&in){
+	int i;
+	for(i=0 ; i < this->n ; i++){
+		if(this->list[i] != NULL){
+			delete (this->list[i]);
+		}
+	}
+	this->list.clear();
+	this->n = in.n;
+	this->HE_seckey = in.HE_seckey;
+	this->HE_pubkey = in.HE_pubkey;
+	this->HE_ea = in.HE_ea;
+	for(i=0 ; i < this->n ; i++){
+		(this->list).push_back(new HE_dr(this->HE_seckey, this->HE_pubkey, this->HE_ea, 0.0));
+	}
+	for(i=0 ; i < this->n ; i++){
+		(*(this->list[i]))+=(*(in.list[i]));
+	}
+	return;
+}
+
+void HE_vector::operator+=(const HE_vector &in){
+	if(this->check(in.n)){
+		return;
+	}
+	int i;
+	for(i=0 ; i < n ; i++){
+		(*(this->list[i]))+=(*(in.list[i]));
+	}
+	return;
+}
+
+void HE_vector::operator-=(const HE_vector &in){
+	if(this->check(in.n)){
+		return;
+	}
+	int i;
+	for(i=0 ; i < n ; i++){
+		(*(this->list[i]))-=(*(in.list[i]));
+	}
+	return;
+}
+
+void HE_vector::operator*=(const HE_vector &in){
+	if(this->check(in.n)){
+		return;
+	}
+	int i;
+	for(i=0 ; i < n ; i++){
+		(*(this->list[i]))*=(*(in.list[i]));
+	}
+	return;
+}
+
+HE_vector HE_vector::operator+(const HE_vector &in){
+	HE_vector ret;
+	if(this->check(in.n)){
+		return ret;
+	}
+	ret = (*this);
+	ret+=in;
+	return ret;
+}
+
+HE_vector HE_vector::operator-(const HE_vector &in){
+	HE_vector ret;
+	if(this->check(in.n)){
+		return ret;
+	}
+	ret = (*this);
+	ret-=in;
+	return ret;
+}
+
+HE_vector HE_vector::operator*(const HE_vector &in){
+	HE_vector ret;
+	if(this->check(in.n)){
+		return ret;
+	}
+	ret = (*this);
+	(ret)*=(in);
+	return ret;
+}
+
+class HE_data{
+	public:
+	vector<double> labels;
+	vector<HE_vector *> data;
+	int n;
+	int m;
+	FHESecKey *HE_seckey;
+	const FHEPubKey *HE_pubkey;
+	EncryptedArray *HE_ea;
+	HE_data(char * filename, FHESecKey *in_seckey, const FHEPubKey *in_pubkey, EncryptedArray *in_ea);
+	vector<HE_vector *> extract_data_rows(int start, int end);
+	vector<double> extract_label_rows(int start, int end);
+};
+
+HE_data::HE_data(char *filename, FHESecKey *in_seckey, const FHEPubKey *in_pubkey, EncryptedArray *in_ea){
+	FILE *fp;
+	char *buffer = (char *)malloc(10000 * sizeof(char));
+	char *ptr = buffer;
+	vector<double> temp_data;
+	temp_data.clear();
+	this->HE_seckey = in_seckey;
+	this->HE_pubkey = in_pubkey;
+	this->HE_ea = in_ea;
+	this->labels.clear();
+	this->data.clear();
+	this->n=0;
+	this->m=0;
+	int isFirst=1;
+	int temp_n=0;
+	int temp_n_set=0;
+	fp = fopen(filename, "r");
+	while(fgets(buffer, 10000, fp)){
+		(this->labels).push_back(atof(ptr));
+		while(1==1){
+			while((*ptr != ',') && (*ptr != '\n') && (*ptr != '\0')){
+				ptr++;
+			}
+			if((*ptr == '\n') || (*ptr == '\0')){
+				if(temp_n_set){
+					if(this->n != temp_n){
+						cerr << "WARNING: Input file matrix rows are not same length." << endl;
+						return;
+					}
+				}
+				else{
+					temp_n_set=1;
+				}
+				this->n = temp_n;
+				this->data.push_back(new HE_vector(this->HE_seckey, this->HE_pubkey, this->HE_ea, &temp_data));
+				temp_data.clear();
+				temp_n=0;
+				ptr=buffer;
+				break;
+			}
+			ptr++;
+			temp_n++;
+			temp_data.push_back(atof(ptr));
+		}
+	}
+	fclose(fp);
+}
+
+vector<HE_vector *> HE_data::extract_data_rows(int start, int end){
+	int i;
+	vector<HE_vector *> ret;
+	for(i=0 ; i < (end-start)+1 ; i++){
+		ret.push_back(this->data[start+i]);
+	}
+	return ret;
+}
+
+vector<double> HE_data::extract_label_rows(int start, int end){
+	int i;
+	vector<double> ret;
+	for(i=0 ; i < (end-start)+1 ; i++){
+		ret.push_back(this->labels[i]);
+	}
+	return ret;
+}
+/*
+HE_vector HE_vector::operator*(const HE_vector &in){
+	HE_vector ret;
+	if(this->check(in.n)){
+		return ret;
+	}
+	ret = in;
+	ret *= (*this);
+	return ret;
+}
+*/
 /**************
 
 1. c1.multiplyBy(c0)
@@ -437,18 +728,28 @@ void  TestIt(long R, long p, long r, long d, long c, long k, long w,
 
 //CSGD Start XXX
 printf("CSGD Start\n");
-FHESecKey *HE_seckey = &secretKey;
-const FHEPubKey *HE_pubkey = &publicKey;
-EncryptedArray *HE_ea = &ea;
-HE_dr Xa;
-HE_dr Xb(HE_seckey, HE_pubkey, HE_ea, -3.3);
-HE_dr Xc(HE_seckey, HE_pubkey, HE_ea, 2.7);
-HE_dr Xd = Xb + Xc;
-HE_dr Xe = Xb - Xc;
-HE_dr Xf = Xd * Xe;
-printf("%f %f %f %f %f %f\n", Xa.extract(), Xb.extract(), Xc.extract(), Xd.extract(), Xe.extract(), Xf.extract());
-//CSGD End
 
+FHESecKey *HE_seckey;
+const FHEPubKey *HE_pubkey;
+EncryptedArray *HE_ea;
+HE_seckey=&secretKey;
+HE_pubkey=&publicKey;
+HE_ea=&ea;
+
+HE_data reader("test.csv", HE_seckey, HE_pubkey, HE_ea);
+vector<HE_vector *> Xa=reader.extract_data_rows(0,1);
+int count=0;
+int countB=0;
+vector<double> temp_out;
+for(count=0 ; count < Xa.size() ; count++){
+	temp_out = (*Xa[count]).decode();
+	for(countB=0 ; countB < temp_out.size() ; countB++){
+		printf("%f ", temp_out[countB]);
+	}
+	printf("\n");
+}
+
+//CSGD End
 
 
 //Original Test_General
