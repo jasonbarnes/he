@@ -46,15 +46,303 @@
 
 //HE_Fix
 
-#define DEFAULT_BITS 16
-#define DEFAULT_SLOTS 32
-#define DEFAULT_WHOLE 8
-#define DEFAULT_FRAC 8
+#define HE_BASE 2147483647
+#define HE_FRAC 8
+#define HE_MAX_SCALE 65536
+//Define the next line if you want to recrypt
+#define HE_RECRYPT_ON
+#define HE_RECRYPT_NOFITY_ONCE
+//#define HE_RECYRPT_NOTIFY_ALL
 
 typedef int P_int;
 typedef P_int E_val;
 
 using namespace std;
+
+int total_recrypts;
+
+class HE_dr{
+	public:
+	Ctxt *data;
+	int p_data;
+	int decrypted_data;
+	int scale;
+	int base;
+	int frac;
+	double orig_value;
+	double final_value;
+	FHESecKey *HE_seckey;
+	const FHEPubKey *HE_pubkey;
+	EncryptedArray *HE_ea;
+	~HE_dr();
+	HE_dr();
+	HE_dr(FHESecKey *in_seckey, const FHEPubKey *in_pubkey, EncryptedArray *in_ea, double in_value);
+	void encode();
+	void decode();
+	void encrypt();
+	void decrypt();
+	double extract();
+	void operator=(const HE_dr &in);
+	void operator+=(const HE_dr &in);
+	void operator-=(const HE_dr &in);
+	void operator*=(const HE_dr &in);
+	HE_dr operator+(const HE_dr &in);
+	HE_dr operator-(const HE_dr &in);
+	HE_dr operator*(const HE_dr &in);
+	void recrypt();
+};
+
+HE_dr::~HE_dr(){
+	if(data != NULL){
+		delete this->data;
+	}
+}
+
+HE_dr::HE_dr(){
+	this->data=NULL;
+	this->p_data=0;
+	this->scale=0;
+	this->base=HE_BASE;
+	this->frac=HE_FRAC;
+	this->orig_value=0.0;
+	this->final_value=0.0;
+	this->HE_seckey=NULL;
+	this->HE_pubkey=NULL;
+	this->HE_ea=NULL;
+}
+
+HE_dr::HE_dr(FHESecKey *in_seckey, const FHEPubKey *in_pubkey, EncryptedArray *in_ea, double in_value){
+	this->data=NULL;
+	this->p_data=0;
+	this->scale=0;
+	this->base=HE_BASE;
+	this->frac=HE_FRAC;
+	this->orig_value=in_value;
+	this->final_value=0.0;
+	this->HE_seckey=in_seckey;
+	this->HE_pubkey=in_pubkey;
+	this->HE_ea=in_ea;
+	this->encode();
+}
+
+void HE_dr::encode(){
+	double value=this->orig_value;
+	int whole_part;
+	int isNegative;
+	if(value < -1.0){
+		isNegative=1;
+		value*=-1.0;
+	}
+	else{
+		isNegative=0;
+	}
+	this->scale=(int)pow(2.0, (double)this->frac);
+	value = value * this->scale;
+	whole_part = (int)value;
+	whole_part = whole_part % this->base;
+	if(isNegative){
+		whole_part = this->base - whole_part;
+	}
+	this->p_data=whole_part;
+	this->encrypt();
+}
+
+void HE_dr::encrypt(){
+	if(this->HE_seckey == NULL){
+		return;
+	}
+	PlaintextArray temp_pt(*(this->HE_ea));
+	temp_pt.encode(this->p_data);
+	this->data = new Ctxt(*(this->HE_pubkey));
+	(*this->HE_ea).encrypt((*(this->data)), (*this->HE_pubkey), temp_pt);
+}
+
+void HE_dr::decrypt(){
+	//this->decrypted_data=this->p_data;
+	if(this->HE_seckey == NULL){
+		return;
+	}
+	PlaintextArray temp_pt(*(this->HE_ea));
+	(*(this->HE_ea)).decrypt((*(this->data)), (*(this->HE_seckey)), temp_pt);
+	stringstream ss;
+	temp_pt.print(ss);
+	string str = ss.str();
+	this->decrypted_data = atoi(str.c_str()+2);
+	return;
+}
+
+void HE_dr::decode(){
+	this->decrypt();
+	int isNegative=0;
+	if(this->decrypted_data > (this->base/2)){
+		isNegative=1;
+		this->decrypted_data = (this->base)-(this->decrypted_data);
+	}
+	else{
+		isNegative=0;
+	}
+	double value=this->decrypted_data;
+	value = value/((double)(this->scale));
+	if(isNegative){
+		value*=-1.0;
+	}
+	this->final_value=value;
+}
+
+double HE_dr::extract(){
+	this->decode();
+	return this->final_value;
+}
+
+void HE_dr::operator=(const HE_dr &in){
+	if(this->data != NULL){
+		delete this->data;
+	}
+	this->p_data = in.p_data;
+	this->decrypted_data = in.decrypted_data;
+	this->scale = in.scale;
+	this->base = in.base;
+	this->frac = in.frac;
+	this->orig_value = in.orig_value;
+	this->final_value = in.final_value;
+	this->HE_seckey = in.HE_seckey;
+	this->HE_pubkey = in.HE_pubkey;
+	this->HE_ea = in.HE_ea;
+	this->orig_value=0.0;
+	this->encode();
+	(*(this->data))+=(*(in.data));
+	this->p_data = in.p_data;
+}
+
+void HE_dr::operator+=(const HE_dr &in){
+	Ctxt *operand=in.data;
+	int deleteOperand=0;
+	PlaintextArray temp_pt(*(this->HE_ea));
+	PlaintextArray const_scale(*(this->HE_ea));
+	ZZX const_poly;
+	if(this->scale != in.scale){
+		if(this->scale < in.scale){
+			const_scale.encode((in.scale)/(this->scale));
+			(*this->HE_ea).encode(const_poly, const_scale);
+			(*(this->data)).multByConstant(const_poly);
+			this->scale = in.scale;
+			operand = in.data;
+			deleteOperand=0;
+		}
+		else if(in.scale < this->scale){
+			const_scale.encode((this->scale)/(in.scale));
+			(*this->HE_ea).encode(const_poly, const_scale);
+			operand = new Ctxt(*(this->HE_pubkey));
+			temp_pt.encode(0);
+			(*this->HE_ea).encrypt((*(operand)), (*this->HE_pubkey), temp_pt);
+			(*(operand))+=(*(in.data));
+			(*(operand)).multByConstant(const_poly);
+			deleteOperand=1;
+		}
+	}
+	else{
+		deleteOperand=0;
+	}
+	(*(this->data))+=(*(operand));
+	if(deleteOperand){
+		delete operand;
+	}
+	return;
+}
+
+void HE_dr::operator-=(const HE_dr &in){
+	Ctxt *operand=in.data;
+	int deleteOperand=0;
+	PlaintextArray temp_pt(*(this->HE_ea));
+	PlaintextArray const_scale(*(this->HE_ea));
+	ZZX const_poly;
+	if(this->scale != in.scale){
+		if(this->scale < in.scale){
+			const_scale.encode((in.scale)/(this->scale));
+			(*this->HE_ea).encode(const_poly, const_scale);
+			(*(this->data)).multByConstant(const_poly);
+			this->scale = in.scale;
+			operand = in.data;
+			deleteOperand=0;
+		}
+		else if(in.scale < this->scale){
+			const_scale.encode((this->scale)/(in.scale));
+			(*this->HE_ea).encode(const_poly, const_scale);
+			operand = new Ctxt(*(this->HE_pubkey));
+			temp_pt.encode(0);
+			(*this->HE_ea).encrypt((*(operand)), (*this->HE_pubkey), temp_pt);
+			(*(operand))+=(*(in.data));
+			(*(operand)).multByConstant(const_poly);
+			deleteOperand=1;
+		}
+	}
+	else{
+		deleteOperand=0;
+	}
+	(*(this->data))-=(*(operand));
+	if(deleteOperand){
+		delete operand;
+	}
+	return;
+}
+
+void HE_dr::operator*=(const HE_dr &in){
+	(*(this->data))*=(*(in.data));
+	this->scale*=in.scale;
+	if(scale > HE_MAX_SCALE){
+		this->recrypt();
+	}
+	//Fail if overflow has occurred.
+	assert(scale <= HE_MAX_SCALE);
+}
+
+HE_dr HE_dr::operator+(const HE_dr &in){
+	HE_dr ret(this->HE_seckey, this->HE_pubkey, this->HE_ea, 0.0);
+	ret+=(*(this));
+	ret+=in;	
+	return ret;
+}
+
+HE_dr HE_dr::operator-(const HE_dr &in){
+	HE_dr ret(this->HE_seckey, this->HE_pubkey, this->HE_ea, 0.0);
+	ret+=(*(this));
+	ret-=in;	
+	return ret;
+}
+HE_dr HE_dr::operator*(const HE_dr &in){
+	HE_dr ret(this->HE_seckey, this->HE_pubkey, this->HE_ea, 0.0);
+	ret+=(*(this));
+	ret*=in;	
+	return ret;
+}
+
+void HE_dr::recrypt(){
+	int notify_once_error=0;
+	#ifdef HE_RECRYPT_ON
+	if(this->data == NULL){
+		return;
+	}	
+	#ifdef HE_RECRYPT_NOTIFY_ALL
+	notify_once_error=1;
+	cerr << "WARNING: " << total_recrypts << " recrypt() have occurred." << endl;
+	#endif
+	#ifdef HE_RECRYPT_NOTIFY_ONCE
+	if(!notify_once_error){
+		if(total_recrypts == 0){
+			cerr << "WARNING: recrypt() has occurred." << endl;
+		}
+	}
+	#endif
+	total_recrypts++;
+	double value = this->extract();
+	this->orig_value = value;
+	this->p_data=0;
+	this->scale=0;
+	this->final_value=0.0;
+	delete this->data;
+	this->encode();
+	#endif
+}
 
 /**************
 
@@ -149,7 +437,16 @@ void  TestIt(long R, long p, long r, long d, long c, long k, long w,
 
 //CSGD Start XXX
 printf("CSGD Start\n");
-
+FHESecKey *HE_seckey = &secretKey;
+const FHEPubKey *HE_pubkey = &publicKey;
+EncryptedArray *HE_ea = &ea;
+HE_dr Xa;
+HE_dr Xb(HE_seckey, HE_pubkey, HE_ea, -3.3);
+HE_dr Xc(HE_seckey, HE_pubkey, HE_ea, 2.7);
+HE_dr Xd = Xb + Xc;
+HE_dr Xe = Xb - Xc;
+HE_dr Xf = Xd * Xe;
+printf("%f %f %f %f %f %f\n", Xa.extract(), Xb.extract(), Xc.extract(), Xd.extract(), Xe.extract(), Xf.extract());
 //CSGD End
 
 
@@ -348,6 +645,8 @@ int main(int argc, char **argv)
 
   amap.parse(argc, argv);
 
+  p=HE_BASE;
+  total_recrypts=0;
   if (L==0) { // determine L based on R,r
     L = 3*R+3;
     if (p>2 || r>1) { // add some more primes for each round
