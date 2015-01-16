@@ -56,6 +56,8 @@
 #define HE_RECRYPT_NOFITY_ONCE
 //#define HE_RECYRPT_NOTIFY_ALL
 
+//#define HE_VECTOR_DESTRUCT_ON
+//#define HE_DR_DESTRUCT_ON
 typedef int P_int;
 typedef P_int E_val;
 
@@ -74,6 +76,7 @@ class HE_dr{
 	int frac;
 	double orig_value;
 	double final_value;
+	double track_value;
 	FHESecKey *HE_seckey;
 	const FHEPubKey *HE_pubkey;
 	EncryptedArray *HE_ea;
@@ -96,9 +99,12 @@ class HE_dr{
 };
 
 HE_dr::~HE_dr(){
+	#ifdef HE_DR_DESTRUCT_ON
 	if(data != NULL){
 		delete this->data;
+		this->data = NULL;
 	}
+	#endif
 }
 
 HE_dr::HE_dr(){
@@ -108,6 +114,7 @@ HE_dr::HE_dr(){
 	this->base=HE_BASE;
 	this->frac=HE_FRAC;
 	this->orig_value=0.0;
+	this->track_value=0.0;
 	this->final_value=0.0;
 	this->HE_seckey=NULL;
 	this->HE_pubkey=NULL;
@@ -121,6 +128,7 @@ HE_dr::HE_dr(FHESecKey *in_seckey, const FHEPubKey *in_pubkey, EncryptedArray *i
 	this->base=HE_BASE;
 	this->frac=HE_FRAC;
 	this->orig_value=in_value;
+	this->track_value=in_value;
 	this->final_value=0.0;
 	this->HE_seckey=in_seckey;
 	this->HE_pubkey=in_pubkey;
@@ -142,7 +150,9 @@ void HE_dr::encode(){
 	this->scale=(int)pow(2.0, (double)this->frac);
 	value = value * this->scale;
 	whole_part = (int)value;
-	whole_part = whole_part % this->base;
+	if(this->base != 0){
+		whole_part = whole_part % this->base;
+	}
 	if(isNegative){
 		whole_part = this->base - whole_part;
 	}
@@ -200,6 +210,7 @@ double HE_dr::extract(){
 void HE_dr::operator=(const HE_dr &in){
 	if(this->data != NULL){
 		delete this->data;
+		this->data = NULL;
 	}
 	this->p_data = in.p_data;
 	this->decrypted_data = in.decrypted_data;
@@ -207,6 +218,7 @@ void HE_dr::operator=(const HE_dr &in){
 	this->base = in.base;
 	this->frac = in.frac;
 	this->orig_value = in.orig_value;
+	this->track_value = in.track_value;
 	this->final_value = in.final_value;
 	this->HE_seckey = in.HE_seckey;
 	this->HE_pubkey = in.HE_pubkey;
@@ -233,7 +245,12 @@ void HE_dr::operator+=(const HE_dr &in){
 			deleteOperand=0;
 		}
 		else if(in.scale < this->scale){
-			const_scale.encode((this->scale)/(in.scale));
+			if(in.scale == 0){
+				const_scale.encode(pow(2, (double)this->frac));
+			}
+			else{
+				const_scale.encode((this->scale)/(in.scale));
+			}
 			(*this->HE_ea).encode(const_poly, const_scale);
 			operand = new Ctxt(*(this->HE_pubkey));
 			temp_pt.encode(0);
@@ -249,8 +266,10 @@ void HE_dr::operator+=(const HE_dr &in){
 	(*(this->data))+=(*(operand));
 	if(deleteOperand){
 		delete operand;
+		operand=NULL;
 	}
 	this->p_data+=in.p_data;
+	this->track_value+=in.track_value;
 	return;
 }
 
@@ -270,7 +289,12 @@ void HE_dr::operator-=(const HE_dr &in){
 			deleteOperand=0;
 		}
 		else if(in.scale < this->scale){
-			const_scale.encode((this->scale)/(in.scale));
+			if(in.scale == 0){
+				const_scale.encode(pow(2, (double)this->frac));
+			}
+			else{
+				const_scale.encode((this->scale)/(in.scale));
+			}
 			(*this->HE_ea).encode(const_poly, const_scale);
 			operand = new Ctxt(*(this->HE_pubkey));
 			temp_pt.encode(0);
@@ -286,8 +310,10 @@ void HE_dr::operator-=(const HE_dr &in){
 	(*(this->data))-=(*(operand));
 	if(deleteOperand){
 		delete operand;
+		operand = NULL;
 	}
 	this->p_data-=in.p_data;
+	this->track_value-=in.track_value;
 	return;
 }
 
@@ -300,6 +326,7 @@ void HE_dr::operator*=(const HE_dr &in){
 	//Fail if overflow has occurred.
 	assert(scale <= HE_MAX_SCALE);
 	this->p_data*=in.p_data;
+	this->track_value*=in.track_value;
 }
 
 HE_dr HE_dr::operator+(const HE_dr &in){
@@ -323,21 +350,23 @@ HE_dr HE_dr::operator*(const HE_dr &in){
 }
 
 void HE_dr::recrypt(){
-	int notify_once_error=0;
 	#ifdef HE_RECRYPT_ON
 	if(this->data == NULL){
 		return;
 	}	
 	#ifdef HE_RECRYPT_NOTIFY_ALL
-	notify_once_error=1;
 	cerr << "WARNING: " << total_recrypts << " recrypt() have occurred." << endl;
 	#endif
 	#ifdef HE_RECRYPT_NOTIFY_ONCE
+	#ifdef HE_RECRYPT_NOTIFY_ALL
+	cerr << "WARNING: " << total_recrypts << " recrypt() have occurred." << endl;
+	#else
 	if(!notify_once_error){
 		if(total_recrypts == 0){
 			cerr << "WARNING: recrypt() has occurred." << endl;
 		}
 	}
+	#endif
 	#endif
 	total_recrypts++;
 	double value = this->extract();
@@ -346,6 +375,7 @@ void HE_dr::recrypt(){
 	this->scale=0;
 	this->final_value=0.0;
 	delete this->data;
+	this->data = NULL;
 	this->encode();
 	#endif
 }
@@ -354,6 +384,7 @@ class HE_vector{
 	public:
 	vector<HE_dr *> list;
 	int n;
+	//int noDestruct;
 	FHESecKey *HE_seckey;
 	const FHEPubKey *HE_pubkey;
 	EncryptedArray *HE_ea;
@@ -370,19 +401,74 @@ class HE_vector{
 	HE_vector operator-(const HE_vector &in);
 	HE_vector operator*(const HE_vector &in);
 	int check(int other_n);
+	HE_dr sum();
+	void scalarMult(HE_dr in);
+	void setEqual(HE_vector in, FHESecKey *in_seckey, const FHEPubKey *in_pubkey, EncryptedArray *in_ea);
 };
 
-HE_vector::~HE_vector(){
+void HE_vector::setEqual(HE_vector in, FHESecKey *in_seckey, const FHEPubKey *in_pubkey, EncryptedArray *in_ea){
 	int i;
 	for(i=0 ; i < this->n ; i++){
 		if(this->list[i] != NULL){
 			delete (this->list[i]);
+			(this->list[i]) = NULL;
+		}
+	}
+	this->list.clear();
+	this->n = in.n;
+	/*
+	this->HE_seckey = in.HE_seckey;
+	this->HE_pubkey = in.HE_pubkey;
+	this->HE_ea = in.HE_ea;
+	*/
+	this->HE_seckey = in_seckey;
+	this->HE_pubkey = in_pubkey;
+	this->HE_ea = in_ea;
+	in.HE_seckey = in_seckey;
+	in.HE_pubkey = in_pubkey;
+	in.HE_ea = in_ea;
+	for(i=0 ; i < this->n ; i++){
+		(this->list).push_back(new HE_dr(this->HE_seckey, this->HE_pubkey, this->HE_ea, 0.0));
+	}
+	for(i=0 ; (unsigned int)i < this->list.size() ; i++){
+		(*(this->list[i]))+=(*((in).list[i]));
+		//(*(this->list[i]))+=(*(this->list[i]));
+	}
+	//in.noDestruct=1; //TODO: Review if necessary
+	return;
+}
+
+HE_dr HE_vector::sum(){
+	unsigned int i;
+	HE_dr ret(HE_seckey, HE_pubkey, HE_ea, 0.0);
+	for(i=0 ; i < list.size() ; i++){
+		ret+=(*(list[i]));
+	}
+	return ret;
+}
+
+void HE_vector::scalarMult(HE_dr in){
+	unsigned int i;
+	for(i=0 ; i < this->list.size() ; i++){
+		(*(list[i]))*=in;
+	}
+}
+
+HE_vector::~HE_vector(){
+	#ifdef HE_VECTOR_DESTRUCT_ON
+	int i;
+	for(i=0 ; i < this->n ; i++){
+		if(this->list[i] != NULL){
+			delete (this->list[i]);
+			(this->list[i]) = NULL;
 		}
 	}
 	(this->list).clear();
+	#endif
 }
 
 HE_vector::HE_vector(){
+	//this->noDestruct=0;
 	this->n=0;
 	this->list.clear();
 	this->HE_seckey=NULL;
@@ -391,6 +477,7 @@ HE_vector::HE_vector(){
 }
 
 HE_vector::HE_vector(FHESecKey *in_seckey, const FHEPubKey *in_pubkey, EncryptedArray *in_ea, vector<double> *in_data){
+	//this->noDestruct=0;
 	this->n=0;
 	this->list.clear();
 	this->HE_seckey=in_seckey;
@@ -405,12 +492,13 @@ void HE_vector::encode(vector<double> in_data){
 		for(i=0 ; i < this->n ; i++){
 			if(this->list[i] != NULL){
 				delete (this->list[i]);
+				(this->list[i])=NULL;
 			}
 		}
 	}
 	this->list.clear();
 	this->n=0;
-	for(i=0 ; i < in_data.size() ; i++){	
+	for(i=0 ; (unsigned int)i < in_data.size() ; i++){	
 		(this->list).push_back(new HE_dr(this->HE_seckey, this->HE_pubkey, this->HE_ea, in_data[i]));
 	}
 	this->n=in_data.size();
@@ -466,6 +554,7 @@ void HE_vector::operator=(const HE_vector&in){
 	for(i=0 ; i < this->n ; i++){
 		if(this->list[i] != NULL){
 			delete (this->list[i]);
+			(this->list[i])=NULL;
 		}
 	}
 	this->list.clear();
@@ -557,6 +646,8 @@ class HE_data{
 	HE_data(char * filename, FHESecKey *in_seckey, const FHEPubKey *in_pubkey, EncryptedArray *in_ea);
 	vector<HE_vector *> extract_data_rows(int start, int end);
 	vector<double> extract_label_rows(int start, int end);
+	vector<HE_vector *> extract_data_all();
+	vector<double> extract_label_all();
 };
 
 HE_data::HE_data(char *filename, FHESecKey *in_seckey, const FHEPubKey *in_pubkey, EncryptedArray *in_ea){
@@ -572,10 +663,10 @@ HE_data::HE_data(char *filename, FHESecKey *in_seckey, const FHEPubKey *in_pubke
 	this->data.clear();
 	this->n=0;
 	this->m=0;
-	int isFirst=1;
 	int temp_n=0;
 	int temp_n_set=0;
 	fp = fopen(filename, "r");
+	int line_count=1;
 	while(fgets(buffer, 10000, fp)){
 		(this->labels).push_back(atof(ptr));
 		while(1==1){
@@ -624,6 +715,135 @@ vector<double> HE_data::extract_label_rows(int start, int end){
 	}
 	return ret;
 }
+
+vector<HE_vector *> HE_data::extract_data_all(){
+	return this->data;
+}
+
+vector<double> HE_data::extract_label_all(){
+	return this->labels;
+}
+
+HE_dr iprod(HE_vector a, HE_vector b){
+	HE_dr w(a.HE_seckey, a.HE_pubkey, a.HE_ea, 0.0);
+	HE_vector c = a*b;
+	w+=c.sum();
+	return w;
+}
+
+//CSGD code
+//The last 3 variables starting with HE should be passed into
+//any method, since they are used for HElib.
+void linreg_grad_i(HE_vector *g, HE_vector *w, HE_vector *x, int y, HE_dr *alpha, HE_dr *lambda, int d, FHESecKey *HE_seckey, const FHEPubKey *HE_pubkey, EncryptedArray *HE_ea){
+	HE_dr y_dr(HE_seckey, HE_pubkey, HE_ea, double(y));
+	HE_dr c = (*alpha) * (iprod(*w, *x) - y_dr);
+	//XXX
+	(*g).setEqual(*w, HE_seckey, HE_pubkey, HE_ea);
+	fflush(stdout);
+	(*g).scalarMult(c);
+
+	vector<double> temp_zeros;
+	int i;
+	for(i=0 ; i < d ; i++){
+		temp_zeros.push_back(0.0);
+	}
+	HE_vector gw(HE_seckey, HE_pubkey, HE_ea, &temp_zeros);
+	gw+=(*w);
+	gw.scalarMult(((*alpha)*(*lambda)));
+	(*g)+=gw;
+	return;
+}
+
+HE_vector ridge_regression(vector<HE_vector *> *X, vector<int> y, HE_dr *alpha, HE_dr *lambda, int N, int d, int niter, FHESecKey *HE_seckey, const FHEPubKey *HE_pubkey, EncryptedArray *HE_ea ){
+	vector<double> w_start;
+	int i;
+	int j;
+	for(i=0 ; i < d ; i++){
+		w_start.push_back(0.0);
+	}
+	HE_vector w(HE_seckey, HE_pubkey, HE_ea, &w_start);
+	vector<HE_vector *> G;
+	//We can reuse w_start here:
+	for(i=0 ; i < N ; i++){
+		G.push_back(new HE_vector(HE_seckey, HE_pubkey, HE_ea, &w_start));
+	}
+	for(i=0 ; i < niter ; i++){	
+		for(j=0 ; j < N ; j++){
+			linreg_grad_i(G[j], &w, (*X)[j], y[j], alpha, lambda, d, HE_seckey, HE_pubkey, HE_ea);
+		}
+		for(j=0 ; j < N ;j++){
+			w-=(*G[j]);
+		}
+		if(i % 20 == 0){
+			//Debug Statements?
+		}
+	}
+	for(i=0 ; i < N ; i++){
+		delete G[i];
+		G[i]=NULL;
+	}
+	return w;
+}
+
+vector<HE_dr> get_predictions(vector<HE_vector *> *X, HE_vector *w, int N, int d, FHESecKey *HE_seckey, const FHEPubKey *HE_pubkey, EncryptedArray *HE_ea){
+	vector<double> temp_zeros;
+	int i;
+	for(i=0 ; i < N ; i++){
+		temp_zeros.push_back(0.0);
+	}
+	vector<HE_dr> pr;
+	HE_vector *xi;
+	for(i=0 ; i < N ; i++){
+		xi = (*X)[i];
+		pr.push_back(iprod(*w, *xi));
+	}
+	return pr;
+}
+
+double get_accuracy(vector<HE_dr>pr, vector<int> y, int N, FHESecKey *HE_seckey, const FHEPubKey *HE_pubkey, EncryptedArray *HE_ea){
+	int right = 0;
+	int i;
+	long pri;
+	for(i=0 ; i < N ; i++){
+		if(pr[i].extract() >= 0){
+			pri = 1;
+		}
+		else{
+			pri = -1;
+		}
+		if(pri == y[i]){
+			right++;
+		}
+	}
+	return (double)right/(double)N;
+}
+
+void ml_code(vector<HE_vector *> train_data, vector<HE_vector *> test_data, vector<double> train_labels, vector<double> test_labels, FHESecKey *HE_seckey, const FHEPubKey *HE_pubkey, EncryptedArray *HE_ea){
+	unsigned int i;
+	vector<int> y;
+	vector<int> yte;
+	for(i=0 ; i < train_labels.size() ; i++){
+		y.push_back((int)train_labels[i]);
+	}
+	for(i=0 ; i < test_labels.size() ; i++){
+		yte.push_back((int)test_labels[i]);
+	}
+	vector<HE_vector *> *x = &train_data;
+	vector<HE_vector *> *xte = &test_data;
+	int N = (*x).size();
+	int Nte = (*xte).size();
+	int d = (*(*x)[0]).n;
+	int dte = (*(*xte)[0]).n;
+	assert(d == dte);
+	HE_dr alpha(HE_seckey, HE_pubkey, HE_ea, 0.03125);
+	HE_dr lambda(HE_seckey, HE_pubkey, HE_ea, 0.1);
+	HE_vector w = ridge_regression(x, y, &alpha, &lambda, N, d, 2, HE_seckey, HE_pubkey, HE_ea);
+	vector<HE_dr> pr = get_predictions(xte, &w, Nte, dte, HE_seckey, HE_pubkey, HE_ea);
+	double acc = get_accuracy(pr, yte, Nte, HE_seckey, HE_pubkey, HE_ea);
+	printf("Accuracy: %f\n", acc);
+	return;
+}
+
 /*
 HE_vector HE_vector::operator*(const HE_vector &in){
 	HE_vector ret;
@@ -726,8 +946,7 @@ void  TestIt(long R, long p, long r, long d, long c, long k, long w,
   ea.encrypt(c2, publicKey, p2);
   ea.encrypt(c3, publicKey, p3);
 
-//CSGD Start XXX
-printf("CSGD Start\n");
+//CSGD Start
 
 FHESecKey *HE_seckey;
 const FHEPubKey *HE_pubkey;
@@ -735,19 +954,15 @@ EncryptedArray *HE_ea;
 HE_seckey=&secretKey;
 HE_pubkey=&publicKey;
 HE_ea=&ea;
+HE_data reader("heart_train.csv", HE_seckey, HE_pubkey, HE_ea);
+HE_data reader1("heart_test.csv", HE_seckey, HE_pubkey, HE_ea);
+vector<HE_vector *> train_data=reader.extract_data_all();
+vector<HE_vector *> test_data=reader1.extract_data_all();
+vector<double> train_labels=reader.extract_label_all();
+vector<double> test_labels=reader1.extract_label_all();
 
-HE_data reader("test.csv", HE_seckey, HE_pubkey, HE_ea);
-vector<HE_vector *> Xa=reader.extract_data_rows(0,1);
-int count=0;
-int countB=0;
-vector<double> temp_out;
-for(count=0 ; count < Xa.size() ; count++){
-	temp_out = (*Xa[count]).decode();
-	for(countB=0 ; countB < temp_out.size() ; countB++){
-		printf("%f ", temp_out[countB]);
-	}
-	printf("\n");
-}
+printf("File reading/allocation done\n");
+ml_code(train_data, test_data, train_labels, test_labels, HE_seckey, HE_pubkey, HE_ea);
 
 //CSGD End
 
