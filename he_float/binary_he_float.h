@@ -35,4 +35,8 @@ class HE_float{
 	HE_float operator<(const HE_float &in);
 };
 
+deque<int> bitwiseAnd(deque<int> a, deque<int> b);
+deque<int> leftShift(deque<int> a, int shift);
+deque<int> rightShift(deque<int> a, int shift);
+
 #endif

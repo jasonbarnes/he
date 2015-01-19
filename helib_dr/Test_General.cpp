@@ -53,25 +53,33 @@
 #define HE_MAX_SCALE 65536
 //Define the next line if you want to recrypt
 #define HE_RECRYPT_ON
-#define HE_RECRYPT_NOFITY_ONCE
+//#define HE_RECRYPT_NOTIFY_ONCE
 //#define HE_RECYRPT_NOTIFY_ALL
 
 //#define HE_VECTOR_DESTRUCT_ON
 //#define HE_DR_DESTRUCT_ON
+
+//Define the next line to turn HElib on.
+#define HE_ON
+//Define this line to ignore HElib and Plaintext, and output the value as if doubles were used.
+//#define HE_USE_TRACK_VAL
 typedef int P_int;
 typedef P_int E_val;
 
 using namespace std;
 
 int total_recrypts;
-
+int max_recrypts;
+int notify_once_error;
 
 class HE_dr{
 	public:
+	#ifdef HE_ON
 	Ctxt *data;
-	int p_data;
-	int decrypted_data;
-	int scale;
+	#endif
+	unsigned long p_data;
+	unsigned long decrypted_data;
+	unsigned long scale;
 	int base;
 	int frac;
 	double orig_value;
@@ -80,6 +88,8 @@ class HE_dr{
 	FHESecKey *HE_seckey;
 	const FHEPubKey *HE_pubkey;
 	EncryptedArray *HE_ea;
+	int num_recrypts;
+
 	~HE_dr();
 	HE_dr();
 	HE_dr(FHESecKey *in_seckey, const FHEPubKey *in_pubkey, EncryptedArray *in_ea, double in_value);
@@ -100,15 +110,19 @@ class HE_dr{
 
 HE_dr::~HE_dr(){
 	#ifdef HE_DR_DESTRUCT_ON
+	#ifdef HE_ON
 	if(data != NULL){
 		delete this->data;
 		this->data = NULL;
 	}
 	#endif
+	#endif
 }
 
 HE_dr::HE_dr(){
+	#ifdef HE_ON
 	this->data=NULL;
+	#endif
 	this->p_data=0;
 	this->scale=0;
 	this->base=HE_BASE;
@@ -119,10 +133,13 @@ HE_dr::HE_dr(){
 	this->HE_seckey=NULL;
 	this->HE_pubkey=NULL;
 	this->HE_ea=NULL;
+	this->num_recrypts=0;
 }
 
 HE_dr::HE_dr(FHESecKey *in_seckey, const FHEPubKey *in_pubkey, EncryptedArray *in_ea, double in_value){
+	#ifdef HE_ON
 	this->data=NULL;
+	#endif
 	this->p_data=0;
 	this->scale=0;
 	this->base=HE_BASE;
@@ -133,6 +150,7 @@ HE_dr::HE_dr(FHESecKey *in_seckey, const FHEPubKey *in_pubkey, EncryptedArray *i
 	this->HE_seckey=in_seckey;
 	this->HE_pubkey=in_pubkey;
 	this->HE_ea=in_ea;
+	this->num_recrypts=0;
 	this->encode();
 }
 
@@ -161,6 +179,7 @@ void HE_dr::encode(){
 }
 
 void HE_dr::encrypt(){
+	#ifdef HE_ON
 	if(this->HE_seckey == NULL){
 		return;
 	}
@@ -168,10 +187,12 @@ void HE_dr::encrypt(){
 	temp_pt.encode(this->p_data);
 	this->data = new Ctxt(*(this->HE_pubkey));
 	(*this->HE_ea).encrypt((*(this->data)), (*this->HE_pubkey), temp_pt);
+	#endif
 }
 
 void HE_dr::decrypt(){
 	//this->decrypted_data=this->p_data;
+	#ifdef HE_ON
 	if(this->HE_seckey == NULL){
 		return;
 	}
@@ -181,11 +202,18 @@ void HE_dr::decrypt(){
 	temp_pt.print(ss);
 	string str = ss.str();
 	this->decrypted_data = atoi(str.c_str()+2);
+	#else
+	this->decrypted_data = this->p_data;
+	#endif
 	return;
 }
 
 void HE_dr::decode(){
 	this->decrypt();
+	/*
+	printf("Plaintext:  %d\n", this->p_data);
+	printf("Ciphertext: %d\n", this->decrypted_data);
+	*/
 	int isNegative=0;
 	if(this->decrypted_data > (this->base/2)){
 		isNegative=1;
@@ -208,10 +236,12 @@ double HE_dr::extract(){
 }
 
 void HE_dr::operator=(const HE_dr &in){
+	#ifdef HE_ON
 	if(this->data != NULL){
 		delete this->data;
 		this->data = NULL;
 	}
+	#endif
 	this->p_data = in.p_data;
 	this->decrypted_data = in.decrypted_data;
 	this->scale = in.scale;
@@ -225,11 +255,16 @@ void HE_dr::operator=(const HE_dr &in){
 	this->HE_ea = in.HE_ea;
 	this->orig_value=0.0;
 	this->encode();
+	#ifdef HE_ON
 	(*(this->data))+=(*(in.data));
+	#endif
 	this->p_data = in.p_data;
 }
 
 void HE_dr::operator+=(const HE_dr &in){
+	unsigned long temp_p_data = in.p_data;
+	int temp_scale = in.scale;
+	#ifdef HE_ON
 	Ctxt *operand=in.data;
 	int deleteOperand=0;
 	PlaintextArray temp_pt(*(this->HE_ea));
@@ -240,17 +275,25 @@ void HE_dr::operator+=(const HE_dr &in){
 			const_scale.encode((in.scale)/(this->scale));
 			(*this->HE_ea).encode(const_poly, const_scale);
 			(*(this->data)).multByConstant(const_poly);
+			this->p_data*=(in.scale)/(this->scale);
+			this->p_data = (this->p_data) % HE_BASE;
 			this->scale = in.scale;
 			operand = in.data;
 			deleteOperand=0;
 		}
 		else if(in.scale < this->scale){
 			if(in.scale == 0){
-				const_scale.encode(pow(2, (double)this->frac));
+				//const_scale.encode(pow(2, (double)this->frac));
+				//Test Line
+				const_scale.encode((int)(this->scale)/((int)pow(2, (double)this->frac)));
+				temp_scale = (int)(this->scale)/((int)pow(2, (double)this->frac));
 			}
 			else{
 				const_scale.encode((this->scale)/(in.scale));
+				temp_scale = (this->scale)/(in.scale);
 			}
+			temp_p_data *= temp_scale;
+			temp_p_data = temp_p_data % HE_BASE;
 			(*this->HE_ea).encode(const_poly, const_scale);
 			operand = new Ctxt(*(this->HE_pubkey));
 			temp_pt.encode(0);
@@ -268,12 +311,38 @@ void HE_dr::operator+=(const HE_dr &in){
 		delete operand;
 		operand=NULL;
 	}
-	this->p_data+=in.p_data;
+	#else
+	if(this->scale != in.scale){
+		int temp_p_data = in.p_data;
+		int temp_scale = in.scale;
+		if(this->scale < in.scale){
+			//XXX
+			(this->p_data)*=((in.scale)/(this->scale));
+			this->p_data = (this->p_data) % HE_BASE;
+			this->scale = in.scale;
+		}
+		else if(in.scale < this->scale){
+			if(in.scale == 0){
+				temp_scale = (int)(this->scale)/((int)pow(2, (double)this->frac));
+			}
+			else{
+				temp_scale = (this->scale)/(in.scale);
+			}
+			temp_p_data *= temp_scale;
+			temp_p_data = temp_p_data % HE_BASE;
+		}
+	}
+	#endif
+	this->p_data+=temp_p_data;
+	this->p_data = (this->p_data) % HE_BASE;
 	this->track_value+=in.track_value;
 	return;
 }
 
 void HE_dr::operator-=(const HE_dr &in){
+	unsigned long temp_p_data = in.p_data;
+	int temp_scale = in.scale;
+	#ifdef HE_ON
 	Ctxt *operand=in.data;
 	int deleteOperand=0;
 	PlaintextArray temp_pt(*(this->HE_ea));
@@ -284,17 +353,25 @@ void HE_dr::operator-=(const HE_dr &in){
 			const_scale.encode((in.scale)/(this->scale));
 			(*this->HE_ea).encode(const_poly, const_scale);
 			(*(this->data)).multByConstant(const_poly);
+			this->p_data*=(in.scale)/(this->scale);
+			this->p_data = (this->p_data) % HE_BASE;
 			this->scale = in.scale;
 			operand = in.data;
 			deleteOperand=0;
 		}
 		else if(in.scale < this->scale){
 			if(in.scale == 0){
-				const_scale.encode(pow(2, (double)this->frac));
+				//const_scale.encode(pow(2, (double)this->frac));
+				//Test Line
+				const_scale.encode((int)(this->scale)/((int)pow(2, (double)this->frac)));
+				temp_scale = (int)(this->scale)/((int)pow(2, (double)this->frac));
 			}
 			else{
 				const_scale.encode((this->scale)/(in.scale));
+				temp_scale = (this->scale)/(in.scale);
 			}
+			temp_p_data *= temp_scale;
+			temp_p_data = temp_p_data % HE_BASE;
 			(*this->HE_ea).encode(const_poly, const_scale);
 			operand = new Ctxt(*(this->HE_pubkey));
 			temp_pt.encode(0);
@@ -310,22 +387,54 @@ void HE_dr::operator-=(const HE_dr &in){
 	(*(this->data))-=(*(operand));
 	if(deleteOperand){
 		delete operand;
-		operand = NULL;
+		operand=NULL;
 	}
-	this->p_data-=in.p_data;
+	#else
+	if(this->scale != in.scale){
+		temp_p_data = in.p_data;
+		temp_scale = in.scale;
+		if(this->scale < in.scale){
+			//XXX
+			(this->p_data)*=((in.scale)/(this->scale));
+			this->p_data = (this->p_data) % HE_BASE;
+			this->scale = in.scale;
+		}
+		else if(in.scale < this->scale){
+			if(in.scale == 0){
+				temp_scale = (int)(this->scale)/((int)pow(2, (double)this->frac));
+			}
+			else{
+				temp_scale = (this->scale)/(in.scale);
+			}
+			temp_p_data *= temp_scale;
+			temp_p_data = temp_p_data % HE_BASE;
+		}
+	}
+	#endif
+	this->p_data-=temp_p_data;
+	this->p_data = (this->p_data) % HE_BASE;
 	this->track_value-=in.track_value;
 	return;
+
 }
 
 void HE_dr::operator*=(const HE_dr &in){
+	#ifdef HE_ON
 	(*(this->data))*=(*(in.data));
-	this->scale*=in.scale;
-	if(scale > HE_MAX_SCALE){
+	#endif
+	this->p_data*=in.p_data;
+	this->p_data = this->p_data % HE_BASE;
+	if(in.scale != 0){
+		this->scale*=in.scale;
+	}
+	else{
+		this->scale*=(int)pow(2.0, (double)this->frac);
+	}
+	if(this->scale > HE_MAX_SCALE){
 		this->recrypt();
 	}
 	//Fail if overflow has occurred.
 	assert(scale <= HE_MAX_SCALE);
-	this->p_data*=in.p_data;
 	this->track_value*=in.track_value;
 }
 
@@ -351,9 +460,11 @@ HE_dr HE_dr::operator*(const HE_dr &in){
 
 void HE_dr::recrypt(){
 	#ifdef HE_RECRYPT_ON
+	#ifdef HE_ON
 	if(this->data == NULL){
 		return;
-	}	
+	}
+	#endif
 	#ifdef HE_RECRYPT_NOTIFY_ALL
 	cerr << "WARNING: " << total_recrypts << " recrypt() have occurred." << endl;
 	#endif
@@ -366,16 +477,23 @@ void HE_dr::recrypt(){
 			cerr << "WARNING: recrypt() has occurred." << endl;
 		}
 	}
+	notify_once_error=1;
 	#endif
 	#endif
 	total_recrypts++;
+	this->num_recrypts++;
+	if(this->num_recrypts > max_recrypts){
+		max_recrypts = this->num_recrypts;
+	}
 	double value = this->extract();
 	this->orig_value = value;
 	this->p_data=0;
 	this->scale=0;
 	this->final_value=0.0;
+	#ifdef HE_ON
 	delete this->data;
 	this->data = NULL;
+	#endif
 	this->encode();
 	#endif
 }
@@ -724,10 +842,13 @@ vector<double> HE_data::extract_label_all(){
 	return this->labels;
 }
 
-HE_dr iprod(HE_vector a, HE_vector b){
-	HE_dr w(a.HE_seckey, a.HE_pubkey, a.HE_ea, 0.0);
+HE_dr *iprod(HE_vector a, HE_vector b){
+	HE_dr *w = new HE_dr(a.HE_seckey, a.HE_pubkey, a.HE_ea, 0.0);
 	HE_vector c = a*b;
-	w+=c.sum();
+	int i;
+	for(i=0 ; i < c.list.size() ; i++){
+	}
+	(*w)+=c.sum();
 	return w;
 }
 
@@ -736,12 +857,12 @@ HE_dr iprod(HE_vector a, HE_vector b){
 //any method, since they are used for HElib.
 void linreg_grad_i(HE_vector *g, HE_vector *w, HE_vector *x, int y, HE_dr *alpha, HE_dr *lambda, int d, FHESecKey *HE_seckey, const FHEPubKey *HE_pubkey, EncryptedArray *HE_ea){
 	HE_dr y_dr(HE_seckey, HE_pubkey, HE_ea, double(y));
-	HE_dr c = (*alpha) * (iprod(*w, *x) - y_dr);
-	//XXX
-	(*g).setEqual(*w, HE_seckey, HE_pubkey, HE_ea);
-	fflush(stdout);
+	HE_dr *iprod_res = iprod(*w, *x);
+	HE_dr iy_res = (*iprod_res)-y_dr;
+	HE_dr c =((*alpha) * (iy_res));
+	(*g).setEqual(*x, HE_seckey, HE_pubkey, HE_ea);
 	(*g).scalarMult(c);
-
+	//printf("%f\n", (*g).list[0]->track_value);
 	vector<double> temp_zeros;
 	int i;
 	for(i=0 ; i < d ; i++){
@@ -749,8 +870,10 @@ void linreg_grad_i(HE_vector *g, HE_vector *w, HE_vector *x, int y, HE_dr *alpha
 	}
 	HE_vector gw(HE_seckey, HE_pubkey, HE_ea, &temp_zeros);
 	gw+=(*w);
-	gw.scalarMult(((*alpha)*(*lambda)));
+	HE_dr al_lam = (*alpha)*(*lambda);
+	gw.scalarMult(al_lam);
 	(*g)+=gw;
+	delete iprod_res;
 	return;
 }
 
@@ -774,9 +897,11 @@ HE_vector ridge_regression(vector<HE_vector *> *X, vector<int> y, HE_dr *alpha, 
 		for(j=0 ; j < N ;j++){
 			w-=(*G[j]);
 		}
-		if(i % 20 == 0){
-			//Debug Statements?
+		#ifndef HE_ON
+		if(i % 1 == 0){
+			//printf("%f %f\n", w.list[0]->track_value, w.list[1]->track_value);
 		}
+		#endif
 	}
 	for(i=0 ; i < N ; i++){
 		delete G[i];
@@ -785,13 +910,13 @@ HE_vector ridge_regression(vector<HE_vector *> *X, vector<int> y, HE_dr *alpha, 
 	return w;
 }
 
-vector<HE_dr> get_predictions(vector<HE_vector *> *X, HE_vector *w, int N, int d, FHESecKey *HE_seckey, const FHEPubKey *HE_pubkey, EncryptedArray *HE_ea){
+vector<HE_dr *> get_predictions(vector<HE_vector *> *X, HE_vector *w, int N, int d, FHESecKey *HE_seckey, const FHEPubKey *HE_pubkey, EncryptedArray *HE_ea){
 	vector<double> temp_zeros;
 	int i;
 	for(i=0 ; i < N ; i++){
 		temp_zeros.push_back(0.0);
 	}
-	vector<HE_dr> pr;
+	vector<HE_dr *> pr;
 	HE_vector *xi;
 	for(i=0 ; i < N ; i++){
 		xi = (*X)[i];
@@ -800,12 +925,16 @@ vector<HE_dr> get_predictions(vector<HE_vector *> *X, HE_vector *w, int N, int d
 	return pr;
 }
 
-double get_accuracy(vector<HE_dr>pr, vector<int> y, int N, FHESecKey *HE_seckey, const FHEPubKey *HE_pubkey, EncryptedArray *HE_ea){
+double get_accuracy(vector<HE_dr *>pr, vector<int> y, int N, FHESecKey *HE_seckey, const FHEPubKey *HE_pubkey, EncryptedArray *HE_ea){
 	int right = 0;
 	int i;
 	long pri;
 	for(i=0 ; i < N ; i++){
-		if(pr[i].extract() >= 0){
+		#ifdef HE_USE_TRACK_VAL
+		if(pr[i]->track_value >= 0){
+		#else
+		if(pr[i]->extract() >= 0){
+		#endif
 			pri = 1;
 		}
 		else{
@@ -814,8 +943,32 @@ double get_accuracy(vector<HE_dr>pr, vector<int> y, int N, FHESecKey *HE_seckey,
 		if(pri == y[i]){
 			right++;
 		}
+		delete pr[i];
 	}
 	return (double)right/(double)N;
+}
+
+HE_vector ridge_regression_sgd(vector<HE_vector *> *X, vector<int> y, HE_dr *alpha, HE_dr *lambda, int N, int d, int niter, FHESecKey *HE_seckey, const FHEPubKey *HE_pubkey, EncryptedArray *HE_ea ){
+	vector<double> w_start;
+	int i,j;
+	for(i=0 ; i < d ; i++){
+		w_start.push_back(0.0);
+	}
+	HE_vector w(HE_seckey, HE_pubkey, HE_ea, &w_start);
+	HE_vector g(HE_seckey, HE_pubkey, HE_ea, &w_start);
+	int k=0;
+	for(i=0 ; i < niter; i++){
+		linreg_grad_i(&g, &w, (*X)[k], y[k], alpha, lambda, d, HE_seckey, HE_pubkey, HE_ea);
+		w-=g;
+		k = (k+1) % N;
+		if(i % 1 == 0){
+			#ifndef HE_ON
+			//printf("%f %f\n", w.list[0]->track_value, w.list[1]->track_value);
+			//printf("%f %f\n", w.list[0]->extract(), w.list[1]->extract());
+			#endif
+		}
+	}
+	return w;
 }
 
 void ml_code(vector<HE_vector *> train_data, vector<HE_vector *> test_data, vector<double> train_labels, vector<double> test_labels, FHESecKey *HE_seckey, const FHEPubKey *HE_pubkey, EncryptedArray *HE_ea){
@@ -835,12 +988,14 @@ void ml_code(vector<HE_vector *> train_data, vector<HE_vector *> test_data, vect
 	int d = (*(*x)[0]).n;
 	int dte = (*(*xte)[0]).n;
 	assert(d == dte);
-	HE_dr alpha(HE_seckey, HE_pubkey, HE_ea, 0.03125);
+	HE_dr alpha(HE_seckey, HE_pubkey, HE_ea, 0.0078125);
 	HE_dr lambda(HE_seckey, HE_pubkey, HE_ea, 0.1);
-	HE_vector w = ridge_regression(x, y, &alpha, &lambda, N, d, 2, HE_seckey, HE_pubkey, HE_ea);
-	vector<HE_dr> pr = get_predictions(xte, &w, Nte, dte, HE_seckey, HE_pubkey, HE_ea);
+	//HE_vector w = ridge_regression(x, y, &alpha, &lambda, N, d, 1000, HE_seckey, HE_pubkey, HE_ea);
+	HE_vector w = ridge_regression_sgd(x, y, &alpha, &lambda, N, d, 100, HE_seckey, HE_pubkey, HE_ea);
+	vector<HE_dr *> pr = get_predictions(xte, &w, Nte, dte, HE_seckey, HE_pubkey, HE_ea);
 	double acc = get_accuracy(pr, yte, Nte, HE_seckey, HE_pubkey, HE_ea);
 	printf("Accuracy: %f\n", acc);
+//	printf("Max Recrypts: %d\n", max_recrypts);
 	return;
 }
 
@@ -870,10 +1025,14 @@ HE_vector HE_vector::operator*(const HE_vector &in){
 
 **************/
 
-
+#ifdef HE_ON
 void  TestIt(long R, long p, long r, long d, long c, long k, long w, 
                long L, long m, const Vec<long>& gens, const Vec<long>& ords)
+#else
+void TestIt()
+#endif
 {
+#ifdef HE_ON
   //char buffer[32];
   /*cerr << "\n\n******** TestIt: R=" << R 
        << ", p=" << p
@@ -946,14 +1105,22 @@ void  TestIt(long R, long p, long r, long d, long c, long k, long w,
   ea.encrypt(c2, publicKey, p2);
   ea.encrypt(c3, publicKey, p3);
 
+#endif
 //CSGD Start
 
+system("date");
 FHESecKey *HE_seckey;
 const FHEPubKey *HE_pubkey;
 EncryptedArray *HE_ea;
+#ifdef HE_ON
 HE_seckey=&secretKey;
 HE_pubkey=&publicKey;
 HE_ea=&ea;
+#else
+HE_seckey=NULL;
+HE_pubkey=NULL;
+HE_ea=NULL;
+#endif
 HE_data reader("heart_train.csv", HE_seckey, HE_pubkey, HE_ea);
 HE_data reader1("heart_test.csv", HE_seckey, HE_pubkey, HE_ea);
 vector<HE_vector *> train_data=reader.extract_data_all();
@@ -962,7 +1129,9 @@ vector<double> train_labels=reader.extract_label_all();
 vector<double> test_labels=reader1.extract_label_all();
 
 printf("File reading/allocation done\n");
+system("date");
 ml_code(train_data, test_data, train_labels, test_labels, HE_seckey, HE_pubkey, HE_ea);
+system("date");
 
 //CSGD End
 
@@ -1110,6 +1279,7 @@ resetAllTimers();
  */
 int main(int argc, char **argv) 
 {
+  #ifdef HE_ON
   setTimersOn();
 
   ArgMapping amap;
@@ -1163,6 +1333,8 @@ int main(int argc, char **argv)
 
   p=HE_BASE;
   total_recrypts=0;
+  max_recrypts=0;
+  notify_once_error=0;
   if (L==0) { // determine L based on R,r
     L = 3*R+3;
     if (p>2 || r>1) { // add some more primes for each round
@@ -1182,7 +1354,13 @@ int main(int argc, char **argv)
     TestIt(R, p, r, d, c, k, w, L, m, gens, ords);
   }
 }
-
+#else
+  total_recrypts=0;
+  max_recrypts=0;
+  notify_once_error=0;
+TestIt();
+}
+#endif
 // call to get our running test case:
 // Test_General_x p=23 m=20485 L=10 R=5
 //
