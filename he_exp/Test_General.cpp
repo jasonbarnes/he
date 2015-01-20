@@ -16,11 +16,23 @@
 
 /* Test_General.cpp - A general test program that uses a mix of operations over four ciphertexts.
  */
+
+
+//Note to Jake, Matt, or Stephen:
+//If you comment out the following line, it turns off all encryption,
+//but the fixed-point representation is still used.
+//It also removes all HElib code, allowing it to be built
+//outside of HElib.
+
+//#define HE_ON
+
+#ifdef HE_ON
 #include <NTL/ZZ.h>
 #include "FHE.h"
 #include "timing.h"
 #include "EncryptedArray.h"
 #include <NTL/lzz_pXFactoring.h>
+#endif
 
 #include <cassert>
 #include <cstdio>
@@ -63,11 +75,16 @@
 //#define HE_DR_DESTRUCT_ON
 
 //Define the next line to turn HElib on.
-//#define HE_ON
 //Define this line to ignore HElib and Plaintext, and output the value as if doubles were used.
 //#define HE_USE_TRACK_VAL
 typedef int P_int;
 typedef P_int E_val;
+
+#ifndef HE_ON
+typedef int* FHESecKey;
+typedef int* FHEPubKey;
+typedef int* EncryptedArray;
+#endif
 
 using namespace std;
 
@@ -116,6 +133,7 @@ class HE_float{
 	HE_float operator*(const HE_float &in);
 	HE_float operator/(const HE_float &in);
 	void recrypt();
+	deque<unsigned long> multiplyExpoP(deque<unsigned long> a, deque<unsigned long> b, int stop);
 };
 
 HE_float::~HE_float(){
@@ -155,12 +173,17 @@ HE_float::HE_float(FHESecKey *in_seckey, const FHEPubKey *in_pubkey, EncryptedAr
 //This function takes the value in orig_value and transforms it into a bitwise representation
 //Stored in p_mant and p_expo
 void HE_float::encode(){
-	this->orig_value = abs(this->orig_value); //This scheme is only proved for positive
+	//this->orig_value = abs(this->orig_value); //This scheme is only proved for positive
 						  //values.  This may change later.
 
-	float fl_value = (float)this->orig_value; //We lose some precision here, but it's
-						  //easier than working with doubles during
-						  //bit conversions...
+	int isNegative=0;
+	if(this->orig_value < 0.0){
+		isNegative=1;
+	}
+
+	float fl_value = (float)abs(this->orig_value); //We lose some precision here, but it's
+						      //easier than working with doubles during
+						     //bit conversions...
 	unsigned int bits;
 	deque<unsigned long> temp_mant;
 	assert(sizeof(float)==sizeof(int));//Just to make sure this isnt an odd OS/compiler.
@@ -186,12 +209,23 @@ void HE_float::encode(){
 		this->p_mant.push_back(0);
 	}
 	bits = bits >> this->mant_bits;
+	//bits = (bits - this->bias) % (int)pow(2.0, (double)this->expo_bits);
 	for(i=0 ; i < (int)pow(2.0, (double)this->expo_bits); i++){
 		if((unsigned int)i==bits){
 			this->p_expo.push_back(1);
 		}
 		else{
 			this->p_expo.push_back(0);
+		}
+	}
+	if(isNegative){
+		//We do negatives on a digit-by-digit basis instead of doing 2's complement
+		//or something like that.  It's a bit easier to handle since each digit
+		//is modulo this->base, and HElib supports the '-=' operation.
+		for(i=0 ; i < this->p_mant.size() ; i++){
+			if(this->p_mant[i] == 1){
+				this->p_mant[i] = this->base-1;
+			}
 		}
 	}
 	//Now we've encoded the mantissa and exponent into p_mant and p_expo.  We just
@@ -211,8 +245,15 @@ void HE_float::decode(){
 	for(i=0 ; i < (this->mant_bits)+1 ; i++){
 		this->final_mant.pop_back();
 	}
+	double negativeMult;
 	for(i=this->final_mant.size()-1; i>=0; i--){
-		this->final_value+=final_mant[i]*pow(2.0, (double)j);
+		double negativeMult=1.0;
+		if(final_mant[i] > (this->base >> 1)){
+			//This means we're negative
+			final_mant[i] = (this->base)-final_mant[i];
+			negativeMult=-1.0;
+		}
+		this->final_value+=negativeMult*final_mant[i]*pow(2.0, (double)j);
 		j--;
 	}
 	for(i=0 ; i < final_expo.size() ; i++){
@@ -221,6 +262,15 @@ void HE_float::decode(){
 		}
 	}
 	int temp_expo = i-this->bias;
+	printf("%d\n", temp_expo);
+	/*int temp_expo = i;
+	printf("%d\n", temp_expo);
+	if(temp_expo > this->bias){
+		temp_expo = (int)pow(2.0, (double)this->expo_bits) - temp_expo;
+		temp_expo *= -1;
+	}
+	printf("%d\n", temp_expo);
+	*/
 	this->final_value*=pow(2.0, (double)temp_expo);
 	return;
 }
@@ -316,7 +366,7 @@ deque<deque<unsigned long> > generatePMantOptionsA(deque<unsigned long> a){
 	}
 	for(i=1 ; i < a.size() ; i++){
 		temp = a;
-		ret.push_back(a);
+		ret.push_back(temp);
 	}
 	return ret;
 }
@@ -332,7 +382,7 @@ deque<deque<unsigned long> > generatePMantOptionsB(deque<unsigned long> a){
 	}
 	for(i=1 ; i < a.size() ; i++){
 		temp = rightShiftP(a, i);
-		ret.push_back(a);
+		ret.push_back(temp);
 	}
 	return ret;
 }
@@ -380,10 +430,9 @@ deque<unsigned long> generatePSelectArray(deque<deque<unsigned long> > a, deque<
 	deque<deque<unsigned long> > c;
 	deque<unsigned long> temp;
 	int i,j;
-
 	for(i=0 ;i < a.size() ; i++){
 		c.push_back(a[i]);
-		for(j=0 ; j < a[0].size() ; i++){
+		for(j=0 ; j < a[0].size() ; j++){
 			c[i][j] &= b[i][j];
 		}
 	}
@@ -409,7 +458,7 @@ deque<unsigned long> p_select(deque<unsigned long> select, deque<deque<unsigned 
 			select_result[i][j] *= select[i];
 		}
 	}
-	final_result = select_result[i];
+	final_result = select_result[0];
 	for(i=1 ; i < select_result.size(); i++){
 		for(j=0 ; j < select_result[i].size(); j++){
 			final_result[j] += select_result[i][j];
@@ -428,7 +477,8 @@ void additiveRescale(HE_float *a, HE_float *b){
 	deque<deque<unsigned long> > p_mant_options_a = generatePMantOptionsA(a->p_mant);
 	deque<deque<unsigned long> > p_mant_options_b = generatePMantOptionsB(b->p_mant);
 	deque<unsigned long> p_select_array = generatePSelectArray(p_expo_options_a, p_expo_options_b);
-//	unsigned long p_max_select = generatePMaxSelect(p_select_array);
+	//unsigned long p_max_select = generatePMaxSelect(p_select_array);
+	int i,j;
 	a->p_expo = p_select(p_select_array, p_expo_options_a);
 	b->p_expo = p_select(p_select_array, p_expo_options_b);
 	a->p_mant = p_select(p_select_array, p_mant_options_a);
@@ -438,13 +488,13 @@ void additiveRescale(HE_float *a, HE_float *b){
 
 void HE_float::operator+=(const HE_float &in){
 	HE_float a = in;
+	int i;
 	additiveRescale(this, &a);
 	#ifdef HE_ON
 	//Ciphertext code
 	#else
 	//This is the plaintext-only version.
 	//Exponents are the same, so we just have to do an add:
-	int i;
 	for(i=0 ; i < this->p_mant.size() ; i++){
 		this->p_mant[i] += a.p_mant[i];
 		this->p_mant[i] = this->p_mant[i] % this->base;
@@ -460,6 +510,7 @@ void HE_float::negate(){
 	int i;
 	for(i=0 ; i < this->p_mant.size() ; i++){
 		this->p_mant[i] = base - this->p_mant[i];
+		this->p_mant[i] = this->p_mant[i] % this->base;
 	}
 	return;
 }
@@ -471,10 +522,15 @@ void HE_float::operator-=(const HE_float &in){
 	return;
 }
 
-deque<unsigned long> multiplyExpoP(deque<unsigned long> a, deque<unsigned long>b){
+deque<unsigned long> HE_float::multiplyExpoP(deque<unsigned long> a, deque<unsigned long>b, int stop){
 	deque<deque<unsigned long> > expo_options;
 	int i,j;
 	deque<unsigned long> temp;
+	/*if(stop==0){
+		return a;
+	}*/
+	stop--;
+	/*expo_options.push_back(a);
 	for(i=1 ; i < a.size() ; i++){
 		expo_options.push_back(leftShiftP(a, i));
 		temp = rightShiftP(b, i-1);
@@ -488,6 +544,33 @@ deque<unsigned long> multiplyExpoP(deque<unsigned long> a, deque<unsigned long>b
 		for(j=0 ; j < temp.size() ; j++){
 			temp[j] += expo_options[i][j];
 		}
+	}*/
+	//Positive a first:
+	deque<unsigned long> temp_a;
+	int expo_count=0;
+	for(i=this->bias ; i < a.size() ; i++){
+		expo_options.push_back(leftShiftP(b, i-this->bias));
+		temp_a = rightShiftP(a, i-this->bias);
+		for(j=0 ; j < temp_a.size() ; j++){
+			expo_options[expo_count][j] *= temp_a[this->bias];
+		}
+		expo_count++;
+	}
+	//Now negative a
+	for(i=this->bias-1 ; i >=0 ; i--){
+		expo_options.push_back(rightShiftP(b, this->bias-i));
+		temp_a = leftShiftP(a, this->bias-i);
+		for(j=0 ; j < temp_a.size() ; j++){
+			expo_options[expo_count][j] *= temp_a[this->bias];
+		}
+		expo_count++;
+	}
+	temp.clear();
+	temp = expo_options[0];
+	for(i=1 ; i < expo_options.size() ; i++){
+		for(j=0 ; j < temp.size() ; j++){
+			temp[j] += expo_options[i][j];
+		}
 	}
 	return temp;
 }
@@ -497,22 +580,57 @@ void HE_float::operator*=(const HE_float &in){
 	HE_float a = in;
 	#ifdef HE_ON
 	#else
-	deque<unsigned long> res_expo_p = multiplyExpoP(this->p_expo, a.p_expo);
-	deque<unsigned long> res;
 	int i,j;
+	for(i=0 ; i < a.p_expo.size() ; i++){
+		printf("%d", a.p_expo[i]);
+	}
+	printf("\n");
+	for(i=0 ; i < this->p_expo.size() ; i++){
+		printf("%d", this->p_expo[i]);
+	}
+	printf("\n");
+	for(i=0 ; i < a.p_mant.size() ; i++){
+		printf("%d ", a.p_mant[i]);
+	}
+	printf("\n");
+	for(i=0 ; i < this->p_mant.size() ; i++){
+		printf("%d ", this->p_mant[i]);
+	}
+	printf("\n");
+	deque<unsigned long> res_expo_p = this->multiplyExpoP(this->p_expo, this->multiplyExpoP(a.p_expo, this->p_expo, 2),2);
+	deque<unsigned long> res;
 	for(i=0 ; i < a.p_mant.size() ; i++){
 		res.push_back(0);
 	}
 	deque<unsigned long> temp;
 	for(i=0 ; i < a.p_mant.size() ; i++){
-		temp = leftShiftP(a.p_mant, i);
+		/*temp = leftShiftP(a.p_mant, i);
 		for(j=0 ; j< temp.size() ; j++){
-			temp[j] *= this->p_mant[j];
+			temp[j] = (temp[j]*this->p_mant[j])%this->base;
+			res[j] = (res[j] + (temp[j]))%this->base;
+		}
+		*/
+		temp = a.p_mant;
+		for(j=0 ; j < temp.size() ; j++){
+			temp[i] *= this->p_mant[i];
+		}
+		temp = leftShiftP(temp, i);
+		for(j=0 ; j< res.size() ;j++){
 			res[j] += temp[j];
 		}
 	}
-	this->p_mant = res;
-	this->p_expo = res_expo_p;
+	this->p_mant = rightShiftP(res, HE_MANT_BITS);
+	this->p_expo = leftShiftP(res_expo_p, HE_MANT_BITS);
+	//this->p_mant = res;
+	//this->p_expo = res_expo_p;
+	for(i=0 ; i < res.size() ; i++){
+		printf("%lu ", res[i]);
+	}
+	printf("\n");
+	for(i=0 ; i < res_expo_p.size() ; i++){
+		printf("%lu", res_expo_p[i]);
+	}
+	printf("\n");
 	#endif
 	return;
 }
@@ -643,7 +761,12 @@ HE_float Xb(HE_seckey, HE_pubkey, HE_ea, 1.7);
 #endif
 HE_float Xa;
 HE_float Xb(NULL, NULL, NULL, 1.7);
-printf("%f\n", Xb.extract());
+HE_float Xc(NULL, NULL, NULL, 0.003125);
+printf("%f %f\n", Xb.extract(), Xc.extract());
+Xb+=Xb;
+printf("%f %f\n", Xb.extract(), Xc.extract());
+Xc*=Xb;
+printf("%f %f\n", Xb.extract(), Xc.extract());
 //CSGD End
 
 
