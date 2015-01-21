@@ -619,16 +619,16 @@ void HE_float::operator*=(const HE_float &in){
 			res[j] += temp[j];
 		}
 	}
-	this->p_mant = rightShiftP(res, HE_MANT_BITS);
-	this->p_expo = leftShiftP(res_expo_p, HE_MANT_BITS);
+	this->p_mant = rightShiftP(res, HE_MANT_BITS + 1);
+	this->p_expo = leftShiftP(res_expo_p, HE_MANT_BITS+ 1);
 	//this->p_mant = res;
 	//this->p_expo = res_expo_p;
 	for(i=0 ; i < res.size() ; i++){
-		printf("%lu ", res[i]);
+		printf("%lu ", this->p_mant[i]);
 	}
 	printf("\n");
 	for(i=0 ; i < res_expo_p.size() ; i++){
-		printf("%lu", res_expo_p[i]);
+		printf("%lu", this->p_expo[i]);
 	}
 	printf("\n");
 	#endif
