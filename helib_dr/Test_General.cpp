@@ -1070,7 +1070,6 @@ void ml_code(vector<HE_vector *> train_data, vector<HE_vector *> test_data, vect
 	unsigned int i;
 	vector<int> y;
 	vector<int> yte;
-	printf("AAA\n");
 	for(i=0 ; i < train_labels.size() ; i++){
 		y.push_back((int)train_labels[i]);
 	}
@@ -1088,9 +1087,7 @@ void ml_code(vector<HE_vector *> train_data, vector<HE_vector *> test_data, vect
 	HE_dr lambda(HE_seckey, HE_pubkey, HE_ea, 0.1);
 	//HE_vector w = ridge_regression(x, y, &alpha, &lambda, N, d, 1000, HE_seckey, HE_pubkey, HE_ea);
 	//HE_vector w = ridge_regression_sgd(x, y, &alpha, &lambda, N, d, 100, HE_seckey, HE_pubkey, HE_ea);
-	printf("Start\n");
 	HE_vector w = logistic_regression(x, y, &alpha, N, d, 2, HE_seckey, HE_pubkey, HE_ea);
-	printf("End\n");
 	//vector<HE_dr *> pr = get_predictions(xte, &w, Nte, dte, HE_seckey, HE_pubkey, HE_ea);
 	//double acc = get_accuracy(pr, yte, Nte, HE_seckey, HE_pubkey, HE_ea);
 	//printf("Accuracy: %f\n", acc);
@@ -1217,7 +1214,7 @@ HE_ea=&ea;
 //HE_seckey=NULL;
 //HE_pubkey=NULL;
 //HE_ea=NULL;
-/*HE_data reader("heart_train.csv", HE_seckey, HE_pubkey, HE_ea);
+HE_data reader("heart_train.csv", HE_seckey, HE_pubkey, HE_ea);
 HE_data reader1("heart_test.csv", HE_seckey, HE_pubkey, HE_ea);
 vector<HE_vector *> train_data=reader.extract_data_all();
 vector<HE_vector *> test_data=reader1.extract_data_all();
@@ -1228,8 +1225,9 @@ printf("File reading/allocation done\n");
 system("date");
 ml_code(train_data, test_data, train_labels, test_labels, HE_seckey, HE_pubkey, HE_ea);
 system("date");
-*/
 
+
+/*
 int count;
 vector<HE_dr *> Xa;
 vector<HE_dr *> Xb;
@@ -1238,7 +1236,6 @@ for(count=0 ; count < 10 ; count++){
 	Xb.push_back(new HE_dr(HE_seckey, HE_pubkey, HE_ea, 1.0));
 }
 
-#pragma omp parallel for default(shared)
 for(count=0 ; count < 10 ; count++){
 	(*(Xa[count])) += (*(Xb[count]));
 }
@@ -1246,6 +1243,8 @@ for(count=0 ; count < 10 ; count++){
 	printf("%f ", (*(Xa[count])).extract());
 }
 printf("\n");
+*/
+
 //CSGD End
 
 
