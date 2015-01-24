@@ -53,7 +53,7 @@
 //HE_Fix
 
 #define HE_BASE 2147483647
-#define HE_FRAC 15
+#define HE_FRAC 8
 #define HE_MAX_SCALE 65536
 //Define the next line if you want to recrypt
 #define HE_RECRYPT_ON
@@ -248,10 +248,8 @@ void HE_dr::decrypt(){
 
 void HE_dr::decode(){
 	this->decrypt();
-	/*
-	printf("Plaintext:  %d\n", this->p_data);
-	printf("Ciphertext: %d\n", this->decrypted_data);
-	*/
+	printf("Plaintext:  %lu\n", this->p_data);
+	printf("Ciphertext: %lu\n", this->decrypted_data);
 	int isNegative=0;
 	if(this->decrypted_data > (this->base/2)){
 		isNegative=1;
@@ -1019,15 +1017,16 @@ void logreg_grad_i(HE_vector *g, HE_vector *w, HE_vector *x, int y, HE_dr *alpha
 	(*ywx) *= e_y;
 	HE_dr *isig_ywx = invsig5(ywx, HE_seckey, HE_pubkey, HE_ea);
 	HE_dr neg1(HE_seckey, HE_pubkey, HE_ea, -1.0);
+	
 	int i;
 	vector<double> zeroes;
-	/*for(i=0 ; i < d ; i++){
+	for(i=0 ; i < d ; i++){
 		zeroes.push_back(0.0);
 	}
-	HE_vector product(HE_seckey, HE_pubkey, HE_ea, zeroes);
+	HE_vector product(HE_seckey, HE_pubkey, HE_ea, &zeroes);
 	product += (*x);
-	*/
-	HE_vector product = (*x);
+	
+	//HE_vector product = (*x);
 	product.scalarMult(neg1);
 	product.scalarMult(e_y);
 	product.scalarMult(*alpha);
@@ -1060,7 +1059,7 @@ HE_vector logistic_regression(vector<HE_vector *> *X, vector<int> y, HE_dr *alph
 			w-=(*(G[j]));
 		}
 		if(i % 1 == 0){
-			printf("%f %f\n",w.list[0]->track_value,w.list[1]->track_value);
+			printf("%f %f\n",w.list[0]->extract() ,w.list[1]->extract());
 		}
 	}
 	return w;
@@ -1086,8 +1085,8 @@ void ml_code(vector<HE_vector *> train_data, vector<HE_vector *> test_data, vect
 	HE_dr alpha(HE_seckey, HE_pubkey, HE_ea, 0.0078125);
 	HE_dr lambda(HE_seckey, HE_pubkey, HE_ea, 0.1);
 	//HE_vector w = ridge_regression(x, y, &alpha, &lambda, N, d, 1000, HE_seckey, HE_pubkey, HE_ea);
-	//HE_vector w = ridge_regression_sgd(x, y, &alpha, &lambda, N, d, 100, HE_seckey, HE_pubkey, HE_ea);
-	HE_vector w = logistic_regression(x, y, &alpha, N, d, 2, HE_seckey, HE_pubkey, HE_ea);
+	HE_vector w = ridge_regression_sgd(x, y, &alpha, &lambda, N, d, 300, HE_seckey, HE_pubkey, HE_ea);
+	//HE_vector w = logistic_regression(x, y, &alpha, N, d, 2, HE_seckey, HE_pubkey, HE_ea);
 	//vector<HE_dr *> pr = get_predictions(xte, &w, Nte, dte, HE_seckey, HE_pubkey, HE_ea);
 	//double acc = get_accuracy(pr, yte, Nte, HE_seckey, HE_pubkey, HE_ea);
 	//printf("Accuracy: %f\n", acc);
