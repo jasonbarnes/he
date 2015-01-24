@@ -16,7 +16,11 @@
 
 /* Test_General.cpp - A general test program that uses a mix of operations over four ciphertexts.
  */
+
+#define HE_ON
+
 #include <NTL/ZZ.h>
+#include <omp.h>
 #include "FHE.h"
 #include "timing.h"
 #include "EncryptedArray.h"
@@ -49,7 +53,7 @@
 //HE_Fix
 
 #define HE_BASE 2147483647
-#define HE_FRAC 8
+#define HE_FRAC 15
 #define HE_MAX_SCALE 65536
 //Define the next line if you want to recrypt
 #define HE_RECRYPT_ON
@@ -60,9 +64,43 @@
 //#define HE_DR_DESTRUCT_ON
 
 //Define the next line to turn HElib on.
-#define HE_ON
 //Define this line to ignore HElib and Plaintext, and output the value as if doubles were used.
 //#define HE_USE_TRACK_VAL
+double ISIG_X[45] = {-5,-4.7857,-4.5714,-4.3571,-4.1429,-3.9286,-3.7143,-3.5,-3.2857,-3.0714,-2.8571,-2.6429,-2.4286,
+	-2.2143,-2,-2,-1.7143,-1.4286,-1.1429,-0.85715,-0.57144,-0.28571,0,0.28571,0.57144,0.85715,1.1429,1.4286,1.7143,
+	2,2,2.2143,2.4286,2.6429,2.8571,3.0714,3.2857,3.5,3.7143,3.9286,4.1429,4.3571,4.5714,4.7857,5};
+
+double ISIG_MU0 = 0.5;
+
+double ISIG100_MU0 = 50;
+
+double ISIG_COVHYP5[2] = {19.6661,2.1586e-08};
+
+double ISIG100_COVHYP5[2] = {19.6661,2.1583e-04};
+
+double ISIG_COVHYP7[2] = {0.3632,0.6510};
+
+double ISIG_KALPHA5[45] = {-162.3962346,13.56465796,102.5927363,128.1942318,110.718322,67.50588964,12.96462863,
+	-41.38093913,-86.75697965,-117.0791677,-128.8555324,-121.0272046,-94.81114663,-53.45740337,-1.888184413,
+	-1.888184413,71.96491964,136.7704059,177.352648,182.9320432,150.113057,84.49872842,5.899009865e-07,
+	-84.49872726,-150.1130559,-182.9320422,-177.352647,-136.7704052,-71.96491901,1.888184869,1.888184869,
+	53.4574037,94.81114682,121.0272047,128.8555323,117.0791676,86.75697941,41.38093883,-12.96462896,-67.50588997,
+	-110.7183223,-128.194232,-102.5927364,-13.56465779,162.396235};
+
+double ISIG100_KALPHA5[45] = {-1.623959059,0.1356459981,1.025924929,1.281939485,1.107180956,0.6750577559,0.1296464823,
+	-0.4138079175,-0.8675673088,-1.17078858,-1.288552098,-1.210269192,-0.9481094474,-0.5345732281,-0.01888250393,
+	-0.01888250393,0.7196464626,1.367699487,1.773520685,1.829314302,1.501125082,0.8449832856,-1.988754649e-06,-0.8449872056,
+	-1.501128831,-1.829317773,-1.77352378,-1.367702123,-0.7196485729,0.01888096448,0.01888096448,0.5345721312,0.9481087922,
+	1.210268964,1.288552269,1.170789104,0.8675681249,0.4138089454,-0.129645342,-0.6750566236,-1.107179974,-1.281938819,
+	-1.025924769,-0.1356465588,1.623957535};
+
+double ISIG_KALPHA7[45] = {342.4487402,-258.5201991,-358.8847212,-205.5251534,27.28849481,217.3715618,312.1464769,
+	314.9958516,219.5507397,69.33254599,-93.61084978,-232.8915048,-316.7418963,-326.9857313,-259.7681461,-259.7681461,
+	-71.76586408,170.8670057,386.1397717,496.8114377,457.5227996,273.1705005,0.1059605875,-272.9121943,-457.1309018,
+	-496.2155225,-385.2951812,-169.7584352,73.06747118,261.2665772,261.2665772,328.3510717,318.4082783,235.6960399,
+	95.23898547,-70.27758154,-220.2867857,-323.3983581,-318.8030115,-207.1267396,-30.78939668,201.3986214,340.8319175,
+	305.2121794,-365.2225162};
+	
 typedef int P_int;
 typedef P_int E_val;
 
@@ -971,10 +1009,68 @@ HE_vector ridge_regression_sgd(vector<HE_vector *> *X, vector<int> y, HE_dr *alp
 	return w;
 }
 
+HE_dr *invsig5(HE_dr *z, FHESecKey *HE_seckey, const FHEPubKey *HE_pubkey, EncryptedArray *HE_ea){
+	return new HE_dr(HE_seckey, HE_pubkey, HE_ea, 1/(1+exp(z->extract())));
+}
+
+void logreg_grad_i(HE_vector *g, HE_vector *w, HE_vector *x, int y, HE_dr *alpha, int d, FHESecKey *HE_seckey, const FHEPubKey *HE_pubkey, EncryptedArray *HE_ea){
+	HE_dr e_y(HE_seckey, HE_pubkey, HE_ea, (double)y);
+	HE_dr *ywx = iprod(*w, *x);
+	(*ywx) *= e_y;
+	HE_dr *isig_ywx = invsig5(ywx, HE_seckey, HE_pubkey, HE_ea);
+	HE_dr neg1(HE_seckey, HE_pubkey, HE_ea, -1.0);
+	int i;
+	vector<double> zeroes;
+	/*for(i=0 ; i < d ; i++){
+		zeroes.push_back(0.0);
+	}
+	HE_vector product(HE_seckey, HE_pubkey, HE_ea, zeroes);
+	product += (*x);
+	*/
+	HE_vector product = (*x);
+	product.scalarMult(neg1);
+	product.scalarMult(e_y);
+	product.scalarMult(*alpha);
+	product.scalarMult(*isig_ywx);
+	(*g) = product;
+	return;
+	
+}
+
+HE_vector logistic_regression(vector<HE_vector *> *X, vector<int> y, HE_dr *alpha, int N, int d, int niter, FHESecKey *HE_seckey, const FHEPubKey *HE_pubkey, EncryptedArray *HE_ea ){
+	vector<double> w_start;
+	int i,j;
+	for(i=0 ; i < d ; i++){
+		w_start.push_back(0.0);
+	}
+	vector<HE_vector *> G;
+	for(i=0 ; i < N ; i++){
+		G.push_back(new HE_vector(HE_seckey, HE_pubkey, HE_ea, &w_start));
+	}
+	HE_vector w(HE_seckey, HE_pubkey, HE_ea, &w_start);
+	//HE_vector g(HE_seckey, HE_pubkey, HE_ea, &w_start);
+	int k=0;
+	HE_vector *g;
+	for(i=0 ; i < niter; i++){
+		for(j=0 ; j < N ; j++){
+			g = G[j];
+			logreg_grad_i(g, &w, (*X)[j], y[j], alpha, d, HE_seckey, HE_pubkey, HE_ea);
+		}
+		for(j=0 ; j < N ; j++){
+			w-=(*(G[j]));
+		}
+		if(i % 1 == 0){
+			printf("%f %f\n",w.list[0]->track_value,w.list[1]->track_value);
+		}
+	}
+	return w;
+}
+
 void ml_code(vector<HE_vector *> train_data, vector<HE_vector *> test_data, vector<double> train_labels, vector<double> test_labels, FHESecKey *HE_seckey, const FHEPubKey *HE_pubkey, EncryptedArray *HE_ea){
 	unsigned int i;
 	vector<int> y;
 	vector<int> yte;
+	printf("AAA\n");
 	for(i=0 ; i < train_labels.size() ; i++){
 		y.push_back((int)train_labels[i]);
 	}
@@ -991,10 +1087,13 @@ void ml_code(vector<HE_vector *> train_data, vector<HE_vector *> test_data, vect
 	HE_dr alpha(HE_seckey, HE_pubkey, HE_ea, 0.0078125);
 	HE_dr lambda(HE_seckey, HE_pubkey, HE_ea, 0.1);
 	//HE_vector w = ridge_regression(x, y, &alpha, &lambda, N, d, 1000, HE_seckey, HE_pubkey, HE_ea);
-	HE_vector w = ridge_regression_sgd(x, y, &alpha, &lambda, N, d, 100, HE_seckey, HE_pubkey, HE_ea);
-	vector<HE_dr *> pr = get_predictions(xte, &w, Nte, dte, HE_seckey, HE_pubkey, HE_ea);
-	double acc = get_accuracy(pr, yte, Nte, HE_seckey, HE_pubkey, HE_ea);
-	printf("Accuracy: %f\n", acc);
+	//HE_vector w = ridge_regression_sgd(x, y, &alpha, &lambda, N, d, 100, HE_seckey, HE_pubkey, HE_ea);
+	printf("Start\n");
+	HE_vector w = logistic_regression(x, y, &alpha, N, d, 2, HE_seckey, HE_pubkey, HE_ea);
+	printf("End\n");
+	//vector<HE_dr *> pr = get_predictions(xte, &w, Nte, dte, HE_seckey, HE_pubkey, HE_ea);
+	//double acc = get_accuracy(pr, yte, Nte, HE_seckey, HE_pubkey, HE_ea);
+	//printf("Accuracy: %f\n", acc);
 //	printf("Max Recrypts: %d\n", max_recrypts);
 	return;
 }
@@ -1112,16 +1211,13 @@ system("date");
 FHESecKey *HE_seckey;
 const FHEPubKey *HE_pubkey;
 EncryptedArray *HE_ea;
-#ifdef HE_ON
 HE_seckey=&secretKey;
 HE_pubkey=&publicKey;
 HE_ea=&ea;
-#else
-HE_seckey=NULL;
-HE_pubkey=NULL;
-HE_ea=NULL;
-#endif
-HE_data reader("heart_train.csv", HE_seckey, HE_pubkey, HE_ea);
+//HE_seckey=NULL;
+//HE_pubkey=NULL;
+//HE_ea=NULL;
+/*HE_data reader("heart_train.csv", HE_seckey, HE_pubkey, HE_ea);
 HE_data reader1("heart_test.csv", HE_seckey, HE_pubkey, HE_ea);
 vector<HE_vector *> train_data=reader.extract_data_all();
 vector<HE_vector *> test_data=reader1.extract_data_all();
@@ -1132,7 +1228,24 @@ printf("File reading/allocation done\n");
 system("date");
 ml_code(train_data, test_data, train_labels, test_labels, HE_seckey, HE_pubkey, HE_ea);
 system("date");
+*/
 
+int count;
+vector<HE_dr *> Xa;
+vector<HE_dr *> Xb;
+for(count=0 ; count < 10 ; count++){
+	Xa.push_back(new HE_dr(HE_seckey, HE_pubkey, HE_ea, 1.0));
+	Xb.push_back(new HE_dr(HE_seckey, HE_pubkey, HE_ea, 1.0));
+}
+
+#pragma omp parallel for default(shared)
+for(count=0 ; count < 10 ; count++){
+	(*(Xa[count])) += (*(Xb[count]));
+}
+for(count=0 ; count < 10 ; count++){
+	printf("%f ", (*(Xa[count])).extract());
+}
+printf("\n");
 //CSGD End
 
 
