@@ -17,7 +17,7 @@
 /* Test_General.cpp - A general test program that uses a mix of operations over four ciphertexts.
  */
 
-#define HE_ON
+//#define HE_ON
 
 #include <NTL/ZZ.h>
 #include <omp.h>
@@ -53,7 +53,7 @@
 //HE_Fix
 
 #define HE_BASE 2147483647
-#define HE_FRAC 8
+#define HE_FRAC 15
 #define HE_MAX_SCALE 65536
 //Define the next line if you want to recrypt
 #define HE_RECRYPT_ON
@@ -196,7 +196,7 @@ void HE_dr::encode(){
 	double value=this->orig_value;
 	int whole_part;
 	int isNegative;
-	if(value < -1.0){
+	if(value < -0.0){
 		isNegative=1;
 		value*=-1.0;
 	}
@@ -213,6 +213,7 @@ void HE_dr::encode(){
 		whole_part = this->base - whole_part;
 	}
 	this->p_data=whole_part;
+	//DELETE
 	this->encrypt();
 }
 
@@ -248,9 +249,19 @@ void HE_dr::decrypt(){
 
 void HE_dr::decode(){
 	this->decrypt();
-	printf("Plaintext:  %lu\n", this->p_data);
-	printf("Ciphertext: %lu\n", this->decrypted_data);
+	//if(this->decrypted_data != this->p_data){
+	//	printf("%lu %lu %ld\n", this->decrypted_data, this->p_data, (long)(this->decrypted_data, this->p_data));
+	//}
 	int isNegative=0;
+	if(this->track_value < 0.0){
+		isNegative=1;
+	}
+	unsigned long actualValue = 0;
+	actualValue = (unsigned long)(abs(this->track_value)*(double)this->scale);
+	if(isNegative){
+		actualValue = this->base - actualValue;
+	}
+	isNegative=0;
 	if(this->decrypted_data > (this->base/2)){
 		isNegative=1;
 		this->decrypted_data = (this->base)-(this->decrypted_data);
@@ -289,12 +300,10 @@ void HE_dr::operator=(const HE_dr &in){
 	this->HE_seckey = in.HE_seckey;
 	this->HE_pubkey = in.HE_pubkey;
 	this->HE_ea = in.HE_ea;
-	this->orig_value=0.0;
 	this->encode();
 	#ifdef HE_ON
 	(*(this->data))+=(*(in.data));
 	#endif
-	this->p_data = in.p_data;
 }
 
 void HE_dr::operator+=(const HE_dr &in){
@@ -349,8 +358,8 @@ void HE_dr::operator+=(const HE_dr &in){
 	}
 	#else
 	if(this->scale != in.scale){
-		int temp_p_data = in.p_data;
-		int temp_scale = in.scale;
+		temp_p_data = in.p_data;
+		temp_scale = in.scale;
 		if(this->scale < in.scale){
 			//XXX
 			(this->p_data)*=((in.scale)/(this->scale));
@@ -369,7 +378,12 @@ void HE_dr::operator+=(const HE_dr &in){
 		}
 	}
 	#endif
-	this->p_data+=temp_p_data;
+	long temp_long = (long)this->p_data + (long)temp_p_data;
+	if(temp_long < 0){
+		temp_long *= -1;
+		temp_long = this->base - temp_long;
+	}
+	this->p_data =(unsigned long)temp_long;
 	this->p_data = (this->p_data) % HE_BASE;
 	this->track_value+=in.track_value;
 	return;
@@ -378,6 +392,7 @@ void HE_dr::operator+=(const HE_dr &in){
 void HE_dr::operator-=(const HE_dr &in){
 	unsigned long temp_p_data = in.p_data;
 	int temp_scale = in.scale;
+	HE_dr a = in;
 	#ifdef HE_ON
 	Ctxt *operand=in.data;
 	int deleteOperand=0;
@@ -447,7 +462,12 @@ void HE_dr::operator-=(const HE_dr &in){
 		}
 	}
 	#endif
-	this->p_data-=temp_p_data;
+	long temp_long = (long)this->p_data - (long)temp_p_data;
+	if(temp_long < 0){
+		temp_long *= -1;
+		temp_long = this->base - temp_long;
+	}
+	this->p_data =(unsigned long)temp_long;
 	this->p_data = (this->p_data) % HE_BASE;
 	this->track_value-=in.track_value;
 	return;
@@ -470,7 +490,7 @@ void HE_dr::operator*=(const HE_dr &in){
 		this->recrypt();
 	}
 	//Fail if overflow has occurred.
-	assert(scale <= HE_MAX_SCALE);
+	//assert(scale <= HE_MAX_SCALE);
 	this->track_value*=in.track_value;
 }
 
@@ -935,7 +955,7 @@ HE_vector ridge_regression(vector<HE_vector *> *X, vector<int> y, HE_dr *alpha, 
 		}
 		#ifndef HE_ON
 		if(i % 1 == 0){
-			//printf("%f %f\n", w.list[0]->track_value, w.list[1]->track_value);
+			printf("%f %f\n", w.list[0]->track_value, w.list[1]->track_value);
 		}
 		#endif
 	}
@@ -1008,16 +1028,29 @@ HE_vector ridge_regression_sgd(vector<HE_vector *> *X, vector<int> y, HE_dr *alp
 }
 
 HE_dr *invsig5(HE_dr *z, FHESecKey *HE_seckey, const FHEPubKey *HE_pubkey, EncryptedArray *HE_ea){
-	return new HE_dr(HE_seckey, HE_pubkey, HE_ea, 1/(1+exp(z->extract())));
+	double value = z->extract();
+	//double value = z->track_value;
+	double den = 1.0+exp(value);
+	double num = 1.0;
+	double in_value = num/den;
+	//printf("%f %f %f %f\n", value, den, num, in_value);
+	return new HE_dr(HE_seckey, HE_pubkey, HE_ea, in_value);
 }
 
 void logreg_grad_i(HE_vector *g, HE_vector *w, HE_vector *x, int y, HE_dr *alpha, int d, FHESecKey *HE_seckey, const FHEPubKey *HE_pubkey, EncryptedArray *HE_ea){
+	//printf("%f %f\n", x->list[0]->extract(), x->list[1]->extract());
 	HE_dr e_y(HE_seckey, HE_pubkey, HE_ea, (double)y);
+	printf("%f %f\n", w->list[0]->extract(), w->list[1]->extract());
+	printf("%f %f\n", x->list[0]->extract(), x->list[1]->extract());
+	
 	HE_dr *ywx = iprod(*w, *x);
+	//printf("%f\n", ywx->extract());
 	(*ywx) *= e_y;
+	//printf("%f\n", ywx->extract());
 	HE_dr *isig_ywx = invsig5(ywx, HE_seckey, HE_pubkey, HE_ea);
 	HE_dr neg1(HE_seckey, HE_pubkey, HE_ea, -1.0);
-	
+	//printf("%f\n", isig_ywx->extract());
+	//printf("%f %f\n", (*x).list[0]->extract(), (*x).list[1]->extract());
 	int i;
 	vector<double> zeroes;
 	for(i=0 ; i < d ; i++){
@@ -1032,6 +1065,7 @@ void logreg_grad_i(HE_vector *g, HE_vector *w, HE_vector *x, int y, HE_dr *alpha
 	product.scalarMult(*alpha);
 	product.scalarMult(*isig_ywx);
 	(*g) = product;
+	//printf("%f %f\n", (*ywx).extract(), (*isig_ywx).extract());
 	return;
 	
 }
@@ -1048,18 +1082,21 @@ HE_vector logistic_regression(vector<HE_vector *> *X, vector<int> y, HE_dr *alph
 	}
 	HE_vector w(HE_seckey, HE_pubkey, HE_ea, &w_start);
 	//HE_vector g(HE_seckey, HE_pubkey, HE_ea, &w_start);
+
 	int k=0;
 	HE_vector *g;
 	for(i=0 ; i < niter; i++){
 		for(j=0 ; j < N ; j++){
 			g = G[j];
+			//printf("%f %f\n", (*X)[j]->list[0]->extract(), (*X)[j]->list[1]->extract());
 			logreg_grad_i(g, &w, (*X)[j], y[j], alpha, d, HE_seckey, HE_pubkey, HE_ea);
 		}
 		for(j=0 ; j < N ; j++){
 			w-=(*(G[j]));
 		}
 		if(i % 1 == 0){
-			printf("%f %f\n",w.list[0]->extract() ,w.list[1]->extract());
+			printf("XXX%f %f\n",w.list[0]->extract() ,w.list[1]->extract());
+			//printf("%f %f\n", w.list[0]->track_value, w.list[1]->track_value);
 		}
 	}
 	return w;
@@ -1082,14 +1119,14 @@ void ml_code(vector<HE_vector *> train_data, vector<HE_vector *> test_data, vect
 	int d = (*(*x)[0]).n;
 	int dte = (*(*xte)[0]).n;
 	assert(d == dte);
-	HE_dr alpha(HE_seckey, HE_pubkey, HE_ea, 0.0078125);
+	HE_dr alpha(HE_seckey, HE_pubkey, HE_ea, 0.00390625);
 	HE_dr lambda(HE_seckey, HE_pubkey, HE_ea, 0.1);
 	//HE_vector w = ridge_regression(x, y, &alpha, &lambda, N, d, 1000, HE_seckey, HE_pubkey, HE_ea);
-	HE_vector w = ridge_regression_sgd(x, y, &alpha, &lambda, N, d, 300, HE_seckey, HE_pubkey, HE_ea);
-	//HE_vector w = logistic_regression(x, y, &alpha, N, d, 2, HE_seckey, HE_pubkey, HE_ea);
-	//vector<HE_dr *> pr = get_predictions(xte, &w, Nte, dte, HE_seckey, HE_pubkey, HE_ea);
-	//double acc = get_accuracy(pr, yte, Nte, HE_seckey, HE_pubkey, HE_ea);
-	//printf("Accuracy: %f\n", acc);
+	//HE_vector w = ridge_regression_sgd(x, y, &alpha, &lambda, N, d, 300, HE_seckey, HE_pubkey, HE_ea);
+	HE_vector w = logistic_regression(x, y, &alpha, N, d, 100, HE_seckey, HE_pubkey, HE_ea);
+	vector<HE_dr *> pr = get_predictions(xte, &w, Nte, dte, HE_seckey, HE_pubkey, HE_ea);
+	double acc = get_accuracy(pr, yte, Nte, HE_seckey, HE_pubkey, HE_ea);
+	printf("Accuracy: %f\n", acc);
 //	printf("Max Recrypts: %d\n", max_recrypts);
 	return;
 }
@@ -1207,14 +1244,26 @@ system("date");
 FHESecKey *HE_seckey;
 const FHEPubKey *HE_pubkey;
 EncryptedArray *HE_ea;
+#ifdef HE_ON
 HE_seckey=&secretKey;
 HE_pubkey=&publicKey;
 HE_ea=&ea;
-//HE_seckey=NULL;
-//HE_pubkey=NULL;
-//HE_ea=NULL;
+#else
+HE_seckey=NULL;
+HE_pubkey=NULL;
+HE_ea=NULL;
+#endif
 HE_data reader("heart_train.csv", HE_seckey, HE_pubkey, HE_ea);
 HE_data reader1("heart_test.csv", HE_seckey, HE_pubkey, HE_ea);
+//HE_data reader("ionosphere_scale_train.csv", HE_seckey, HE_pubkey, HE_ea);
+//HE_data reader1("ionosphere_scale_test.csv", HE_seckey, HE_pubkey, HE_ea);
+//HE_data reader("breast-cancer_train.csv", HE_seckey, HE_pubkey, HE_ea);
+//HE_data reader1("breast-cancer_test.csv", HE_seckey, HE_pubkey, HE_ea);
+//HE_data reader("splice_train.csv", HE_seckey, HE_pubkey, HE_ea);
+//HE_data reader1("splice_test.csv", HE_seckey, HE_pubkey, HE_ea);
+//HE_data reader("a1a_train.csv", HE_seckey, HE_pubkey, HE_ea);
+//HE_data reader1("a1a_test.csv", HE_seckey, HE_pubkey, HE_ea);
+
 vector<HE_vector *> train_data=reader.extract_data_all();
 vector<HE_vector *> test_data=reader1.extract_data_all();
 vector<double> train_labels=reader.extract_label_all();
@@ -1225,6 +1274,21 @@ system("date");
 ml_code(train_data, test_data, train_labels, test_labels, HE_seckey, HE_pubkey, HE_ea);
 system("date");
 
+/*
+HE_dr Xa(HE_seckey, HE_pubkey, HE_ea, 1.1324);
+HE_dr Xb(HE_seckey, HE_pubkey, HE_ea, 43.521);
+HE_dr Xc(HE_seckey, HE_pubkey, HE_ea, -0.03);
+//printf("%f %f %f\n", Xa.extract(), Xb.extract(), Xc.extract());
+HE_dr Xd(HE_seckey, HE_pubkey, HE_ea, 0.0);
+HE_dr Xe(HE_seckey, HE_pubkey, HE_ea, 0.0);
+HE_dr Xf(HE_seckey, HE_pubkey, HE_ea, 0.0);
+
+Xd+=Xa;
+Xd-=Xb;
+
+//printf("%f %f %f\n", Xd.extract(), Xe.extract(), Xf.extract());
+//printf("%f %f %f\n", Xd.track_value, Xe.track_value, Xf.track_value);
+*/
 
 /*
 int count;
